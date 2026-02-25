@@ -58,12 +58,12 @@ if __name__ == '__main__':
     # Hyperparameters can be tuned for better performance: --->
     cluster_manager = SimilarityClusterManager(
         input_dim=observation.shape[1],
-        n_clusters=5,                                       # <--- A key hyperparameter, might need tuning
-        latent_dim=10,
-        pretrain_epochs=50,
-        train_epochs=100,
-        lr=1e-3,
-        verbose=True                                       # <--- Show training progress
+        n_clusters = 5,                                       # <--- A key hyperparameter, might need tuning
+        latent_dim = 10,
+        pretrain_epochs = 50,
+        train_epochs = 100,
+        lr = 1e-3,
+        verbose = True                                       # <--- Show training progress
     )
 
     # Perform clustering (this will take some time due to training): --->

@@ -55,6 +55,8 @@ class Trainer:
         loss_fn = nn.MSELoss()
 
         for epoch in range(self.pretrain_epochs):
+            total_loss = 0
+
             for batch_data in dataloader:
                 x = batch_data[0].to(self.device)
                 x_hat, _ = self.autoencoder(x)
@@ -63,6 +65,12 @@ class Trainer:
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+                total_loss += loss.item()
+
+            avg_loss = total_loss / len(dataloader)
+            if self.verbose and (epoch + 1) % 20 == 0:
+                print(f"Epoch [{epoch+1}/{self.pretrain_epochs}], Loss: {avg_loss:.4f}")
 
         # Initialize cluster centroids with KMeans: --->
         with torch.no_grad():
@@ -93,6 +101,8 @@ class Trainer:
         clustering_loss_fn = nn.KLDivLoss(reduction = 'sum')
 
         for epoch in range(self.train_epochs):
+            total_loss = 0
+
             for i, batch_data in enumerate(dataloader):
                 x = batch_data[0].to(self.device)
 
@@ -111,6 +121,12 @@ class Trainer:
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+                total_loss += loss.item()
+
+            avg_loss = total_loss / len(dataloader)
+            if self.verbose and (epoch + 1) % 20 == 0:
+                print(f"Epoch [{epoch+1}/{self.train_epochs}], Loss: {avg_loss:.4f}")
 
         if self.verbose:
             print("... Joint training complete.")

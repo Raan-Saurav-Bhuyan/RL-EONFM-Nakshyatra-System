@@ -59,14 +59,14 @@ if __name__ == '__main__':
     # Initialize the Contrastive Learning Cluster Manager: --->
     print("--- Initializing Self-Supervised Contrastive Learning ---")
     cluster_manager = ContrastiveClusterManager(
-        input_dim=observation.shape[1],
-        n_clusters=5,
-        representation_dim=16,                                      # <--- Dimension of h
-        projection_dim=8,                                               # <--- Dimension of z
-        epochs=200,
-        lr=1e-3,
-        temperature=0.1,                                                # <--- Lower temp for harder negatives
-        verbose=True
+        input_dim = observation.shape[1],
+        n_clusters = 5,
+        representation_dim = 16,                                      # <--- Dimension of h
+        projection_dim = 8,                                               # <--- Dimension of z
+        epochs = 200,
+        lr = 1e-3,
+        temperature = 0.1,                                                # <--- Lower temp for harder negatives
+        verbose = True
     )
 
     # 3. Perform clustering (trains the model, then runs K-Means): --->
