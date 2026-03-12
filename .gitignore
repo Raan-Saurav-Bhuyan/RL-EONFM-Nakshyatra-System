@@ -208,3 +208,7 @@ __marimo__/
 
 # VS Code workspace settings: --->
 .vscode/
+
+# Others: --->
+visualizations/
+visualizations/clusters/*
