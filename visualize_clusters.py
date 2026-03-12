@@ -72,7 +72,7 @@ def visualize_clusters_pca(observations, clusters, engine_name):
     fig.tight_layout()
     # plt.show()
 
-    plt.savefig("similarity_cluster_visualization.png")
+    plt.savefig(f"visualizations/clusters/{engine_name}_cluster_visualization.png")
 
 
 if __name__ == '__main__':
