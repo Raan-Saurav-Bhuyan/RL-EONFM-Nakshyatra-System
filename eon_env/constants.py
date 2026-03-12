@@ -32,9 +32,9 @@ MODULATION_FORMATS = {
 
 # Simulation Parameters: --->
 SPAN_LENGTH_KM = 80  # Length of a single fiber span (km)
-NUM_LIGHTPATHS = 20  # Number of lightpaths to provision in the network
+NUM_LIGHTPATHS = 800  # Number of lightpaths to provision in the network
 MAX_SIMULATION_STEPS = 365 # Corresponds to one year of daily monitoring
 
 # Soft Failure Simulation: --->
-FAILURE_PROBABILITY = 0.01  # Probability of a new soft failure event per step
+FAILURE_PROBABILITY = 0.05  # Probability of a new soft failure event per step
 DEGRADATION_PER_EVENT_DB = 0.5 # How much a link's quality degrades in one event (dB)
