@@ -7,16 +7,15 @@ class LSHClusterManager:
     Manages the LSH clustering process for EON OPM data.
     Handles normalization and clustering execution.
     """
-    def __init__(self, input_dim=4, num_functions_k=5, window_size_w=2.0, seed=42):
+    def __init__(self, input_dim=4, num_functions_k=4, seed=42):
         """
         Args:
             input_dim (int): Number of OPM metrics (default 4: GSNR, OSNR, CD, PMD).
             num_functions_k (int): Number of hash functions.
-            window_size_w (float): Window size for quantization.
             seed (int): Random seed.
         """
         self.scaler = StandardScaler()
-        self.lsh = LSH(input_dim, num_functions_k, window_size_w, seed)
+        self.lsh = LSH(input_dim, num_functions_k, seed)
 
     def fit_predict(self, observations):
         """

@@ -7,9 +7,10 @@ import torch
 # Import custom modules: --->
 import eon_env                                      # <--- Registers the EON-v0 environment
 from eon_env import constants as const
+from visualize_clusters import visualize_clusters_pca
 
 # Import all clustering managers: --->
-from clustering.LSH import LSHClusterManager
+from clustering.LSH import LSHClusterManager, StandardScaler
 from clustering.similarity_learning import SimilarityClusterManager
 from clustering.contrastive_learning import ContrastiveClusterManager
 
@@ -75,9 +76,10 @@ if __name__ == '__main__':
     start_time = time.time()
 
     if engine_name == 'lsh':
-        # LSH determines the number of clusters automatically: --->
+        # LSH determines the number of clusters automatically via PCA-guided SimHash collisions: --->
+        # Using k = input_dim (4) functions creates a highly optimized 4-bit hash (max 16 possible clusters)
         manager = LSHClusterManager(
-            input_dim = input_dim, num_functions_k = 16, window_size_w = 4.0
+            input_dim = input_dim, num_functions_k = input_dim
         )
     elif engine_name == 'similarity':
         manager = SimilarityClusterManager(
@@ -118,5 +120,8 @@ if __name__ == '__main__':
     print("\n--- Simulation and Aggregation Complete ---")
     final_state_representation = np.array(aggregated_cluster_features)
     print(f"Final state representation for RL agent has shape: {final_state_representation.shape}")
+
+    # Visualize the results: --->
+    visualize_clusters_pca(observation, clusters, engine_name)
 
     env.close()

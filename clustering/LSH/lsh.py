@@ -3,33 +3,26 @@ from collections import defaultdict
 
 class LSH:
     """
-    Locality Sensitive Hashing (LSH) implementation using p-stable distributions
-    (Gaussian) for approximating Euclidean distance.
+    Locality Sensitive Hashing (LSH) implementation using PCA-guided SimHash
+    (Data-Dependent Sign Projections) for approximating Angular Similarity
+    aligned to the axes of maximum data variance.
     """
-    def __init__(self, input_dim, num_functions_k=10, window_size_w=4.0, seed=42):
+    def __init__(self, input_dim, num_functions_k=4, seed=42):
         """
         Args:
             input_dim (int): Dimension of the input vectors (d).
-            num_functions_k (int): Number of hash functions to concatenate (k).
-            window_size_w (float): Quantization window size (w).
+            num_functions_k (int): Number of hash functions/hyperplanes (k).
             seed (int): Random seed for reproducibility.
         """
         self.input_dim = input_dim
         self.k = num_functions_k
-        self.w = window_size_w
         self.rng = np.random.default_rng(seed)
-
-        # Generate random projection vectors 'a' from N(0, 1): --->
-        # Shape: (k, d)
-        self.a = self.rng.standard_normal((self.k, self.input_dim))
-
-        # Generate random offsets 'b' from U[0, w]: --->
-        # Shape: (k, 1)
-        self.b = self.rng.uniform(0, self.w, (self.k, 1))
+        self.a = None
 
     def compute_hashes(self, X):
         """
-        Computes the hash signatures for the input vectors X.
+        Computes the hash signatures for the input vectors X using PCA-guided
+        projections to minimize the required number of hash functions.
 
         Args:
             X (np.ndarray): Input matrix of shape (N, d).
@@ -37,14 +30,40 @@ class LSH:
         Returns:
             np.ndarray: Hash signatures matrix of shape (N, k).
         """
+        # 1. PCA-Guided Hashing: Calculate Covariance Matrix: --->
+        cov = np.cov(X, rowvar=False)
+
+        # 2. Compute eigenvalues and eigenvectors: --->
+        eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+        # 3. Sort descending by variance captured (eigenvalues): --->
+        idx = np.argsort(eigenvalues)[::-1]
+        eigenvalues = eigenvalues[idx]
+        eigenvectors = eigenvectors[:, idx]
+
+        # 4. We can at most extract 'input_dim' principal components: --->
+        actual_k = min(self.k, self.input_dim)
+        top_evals = eigenvalues[:actual_k]
+        top_evecs = eigenvectors[:, :actual_k]
+
+        # 5. Scale eigenvectors: a_i = v_i / sqrt(lambda_i): --->
+        scaling = 1.0 / np.sqrt(np.maximum(top_evals, 1e-10))
+        a_pca = (top_evecs * scaling).T  # Shape: (actual_k, input_dim)
+
+        if self.k > self.input_dim:
+            a_random = self.rng.standard_normal((self.k - self.input_dim, self.input_dim))
+            self.a = np.vstack([a_pca, a_random])
+        else:
+            self.a = a_pca
+
         # Projection: (N, d) . (d, k) -> (N, k): --->
         projections = np.dot(X, self.a.T)
 
-        # Apply offset and windowing: floor((a.x + b) / w): --->
-        # (Broadcasting: (N, k) + (1, k) -> (N, k))
-        transformed = (projections + self.b.T) / self.w
+        # SimHash mapping: positive projections become 1, negative become 0: --->
+        # This converts the continuous space into a binary string for each vector.
+        binary_hashes = (projections >= 0).astype(int)
 
-        return np.floor(transformed).astype(int)
+        return binary_hashes
 
     def cluster(self, X):
         """
