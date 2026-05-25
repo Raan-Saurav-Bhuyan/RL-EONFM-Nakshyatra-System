@@ -101,52 +101,66 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
             suspect_edge_idx = action - 1
             self.unwrapped.topology.isolate_link(suspect_edge_idx)
 
-            # Get the (u,v) tuple for the suspected link: --->
+            # Get the (u,v) tuple for the suspected link
             suspect_u, suspect_v = self.unwrapped.topology.edges_list[suspect_edge_idx]
 
-            # 1. Store current degradation of the suspected link: --->
-            original_suspect_degradation = self.unwrapped.topology._get_link_degradation(suspect_u, suspect_v)
-
-            # 2. Calculate hypothetical GSNR if the suspected link was fixed (all other degradation remains): --->
-            # (Temporarily set degradation of suspected link to 0)
-            self.unwrapped.topology._set_link_degradation(suspect_u, suspect_v, 0.0)
-            self.unwrapped._update_all_opm_metrics()
-            hypothetical_obs = self.unwrapped._get_observation()
-            hypothetical_gsnr_if_correct = self._get_network_mean_gsnr(hypothetical_obs)
-
-            # Restore original degradation: --->
-            self.unwrapped.topology._set_link_degradation(suspect_u, suspect_v, original_suspect_degradation)
-
-            # Step environment forward by T_EVAL_STEPS to evaluate the physical gradient impact over time: --->
+            # Phase 1: Advance environment for T_EVAL_STEPS with the suspected link isolated: --->
+            # (This simulates the observation period where the agent's action (isolation) is in effect)
+            final_obs_isolated = None
+            final_info_isolated = None
             for _ in range(const.T_EVAL_STEPS):
-                eval_obs, _, env_terminated, env_truncated, _ = self.env.step(0)
+                final_obs_isolated, _, env_terminated, env_truncated, final_info_isolated = self.env.step(0)
                 if env_terminated or env_truncated:
                     break
 
-            eval_gsnr = self._get_network_mean_gsnr(eval_obs)
+            eval_gsnr = self._get_network_mean_gsnr(final_obs_isolated)
 
-            # Surrogate Reward Calculation: Did isolating the link achieve the same GSNR as if it were perfectly fixed?
-            # This decouples the reward from other background degradations. --->
+            # Phase 2: Calculate hypothetical GSNR if the suspected link was fixed at this SAME final time step: --->
+            # (This requires temporarily restoring the suspected link's degradation to get the "full" picture,
+            # then setting it to zero to simulate a perfect fix)
+
+            # 1. Temporarily unisolate the link to get its true degradation state at the end of T_EVAL_STEPS: --->
+            self.unwrapped.topology.unisolate_all()
+            self.unwrapped._update_all_opm_metrics() # Update OPMs with all links active
+
+            # 2. Store the degradation of the suspected link at this point: --->
+            degradation_at_eval_end = self.unwrapped.topology._get_link_degradation(suspect_u, suspect_v)
+
+            # 3. Temporarily set degradation of suspected link to 0 to simulate a perfect fix: --->
+            self.unwrapped.topology._set_link_degradation(suspect_u, suspect_v, 0.0)
+            self.unwrapped._update_all_opm_metrics()
+            hypothetical_obs_fixed = self.unwrapped._get_observation()
+            hypothetical_gsnr_if_correct = self._get_network_mean_gsnr(hypothetical_obs_fixed)
+
+            # 4. Restore the suspected link's degradation to its state at the end of T_EVAL_STEPS: --->
+            self.unwrapped.topology._set_link_degradation(suspect_u, suspect_v, degradation_at_eval_end)
+
+            # Phase 3: Calculate Reward: --->
             diff = abs(eval_gsnr - hypothetical_gsnr_if_correct)
+
+            print(f"Hypothetical GSNR: {hypothetical_gsnr_if_correct:.2f}dB")
+            print(f"Evaluated GSNR: {eval_gsnr:.2f}dB")
+            print(f"\nDifference between hypothetical fixed GSNR and Evaluated GSNR: {diff}\n")
 
             if diff < const.GRADIENT_EPSILON:
                 reward = const.POS_REWARD  # Near-perfect localization
             elif diff > const.MAX_DIFFERENCE_FOR_PARTIAL_REWARD:
                 reward = const.NEG_REWARD  # Significant mislocalization
             else:
-                # Interpolate reward between POS_REWARD and NEG_REWARD
-                # As diff increases from GRADIENT_EPSILON to MAX_DIFFERENCE_FOR_PARTIAL_REWARD,
-                # reward decreases from POS_REWARD to NEG_REWARD.
+                # Interpolate reward between POS_REWARD and NEG_REWARD: --->
+                # (As diff increases from GRADIENT_EPSILON to MAX_DIFFERENCE_FOR_PARTIAL_REWARD,
+                # reward decreases from POS_REWARD to NEG_REWARD)
                 scaled_diff = (diff - const.GRADIENT_EPSILON) / (const.MAX_DIFFERENCE_FOR_PARTIAL_REWARD - const.GRADIENT_EPSILON)
                 reward = const.POS_REWARD - scaled_diff * (const.POS_REWARD - const.NEG_REWARD)
 
-            # Restore the link and metrics: --->
-            self.unwrapped.topology.unisolate_all()
+            # Phase 4: Prepare for next step: --->
+            # (Ensure OPMs are updated after all temporary changes and unisolate_all)
             self.unwrapped._update_all_opm_metrics()
             restored_obs = self.unwrapped._get_observation()
             self.state_history.append(self._extract_features(restored_obs))
 
-            info = self.unwrapped._get_info()
+            # The info should be from the final step of the evaluation period: --->
+            info = final_info_isolated if final_info_isolated is not None else self.unwrapped._get_info()
 
             # Reroute actions always terminate the diagnostic episode: --->
             return self._get_historical_state(), reward, True, False, info

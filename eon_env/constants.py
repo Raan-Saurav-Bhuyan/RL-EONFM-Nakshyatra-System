@@ -31,22 +31,22 @@ MODULATION_FORMATS = {
 }
 
 # Simulation Parameters: --->
-SPAN_LENGTH_KM = 80  # Length of a single fiber span (km)
-NUM_LIGHTPATHS = 800  # Number of lightpaths to provision in the network
-MAX_SIMULATION_STEPS = 365 # Corresponds to one year of daily monitoring
+SPAN_LENGTH_KM = 80                      # Length of a single fiber span (km)
+NUM_LIGHTPATHS = 800                    # Number of lightpaths to provision in the network
+MAX_SIMULATION_STEPS = 365        # Corresponds to one year of daily monitoring
 
 # Soft Failure Simulation: --->
-FAILURE_PROBABILITY = 0.05  # Probability of a new soft failure event per step
-DEGRADATION_PER_EVENT_DB = 0.05 # How much a link's quality degrades in one event (dB)
-STATIC_FAILURE_EDGES = [(1, 2), (6, 11), (10, 13), (5, 8), (2, 5)] # Static links to inject failures for RL testing
+FAILURE_PROBABILITY = 0.05                          # Probability of a new soft failure event per step
+DEGRADATION_PER_EVENT_DB = 0.1              # How much a link's quality degrades in one event (dB) - Reduced for more subtle signals
+STATIC_FAILURE_EDGES = [(1, 2), (6, 11), (10, 13), (5, 8), (2, 5), (1, 3), (13, 14), (7, 9), (8, 10)] # Static links to inject failures for RL testing
 
 # RL and Surrogate Reward Parameters: --->
-N_CLUSTERS = 21               # Fixed number of clusters for the state vector (roughly 1 per link)
-HISTORY_WINDOW = 7            # Number of historical states to stack
-T_EVAL_STEPS = 100            # Number of days to evaluate physical gradient after rerouting
-GRADIENT_EPSILON = 0.001       # Minimum dB improvement required to consider stabilization successful
-MAX_DIFFERENCE_FOR_PARTIAL_REWARD = 0.1 # Max GSNR diff (dB) for a non-negative localization reward
+N_CLUSTERS = 21                                     # Fixed number of clusters for the state vector (roughly 1 per link)
+HISTORY_WINDOW = 7                            # Number of historical states to stack
+T_EVAL_STEPS = 100                                 # Number of days to evaluate physical gradient after rerouting
+GRADIENT_EPSILON = 0.0001                   # Very small value for near-perfect match (numerical precision)
+MAX_DIFFERENCE_FOR_PARTIAL_REWARD = 0.1             # Max GSNR diff (dB) for a non-negative localization reward (upper bound for interpolation)
 POS_REWARD = 10
 NEG_REWARD = -5
-MAX_MONITOR_PENALTY = -2.0    # Maximum penalty for monitoring when degradation is severe
-MONITOR_PENALTY_FACTOR = 20.0 # Factor to scale degradation magnitude into monitor penalty
+MAX_MONITOR_PENALTY = -2.0                          # Maximum penalty for monitoring when degradation is severe
+MONITOR_PENALTY_FACTOR = 5.0                   # Factor to scale degradation magnitude into monitor penalty

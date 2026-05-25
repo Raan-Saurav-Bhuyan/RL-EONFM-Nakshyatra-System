@@ -13,7 +13,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class PPOAgent:
     """Proximal Policy Optimization Agent"""
-    def __init__(self, state_dim, action_dim, lr = 1e-3, gamma = 0.99, eps_clip = 0.2, k_epochs = 10):
+    def __init__(self, state_dim, action_dim, lr = 1e-3, gamma = 0.99, eps_clip = 0.2, k_epochs = 4):
         self.policy = ActorCritic(state_dim, action_dim).to(device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
 

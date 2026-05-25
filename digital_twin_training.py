@@ -24,9 +24,9 @@ if __name__ == '__main__':
     # Initialize TensorBoard Writer: --->
     writer = SummaryWriter(log_dir="runs/ppo_eon_training")
 
-    max_episodes = 1000
+    max_episodes = 100
     max_steps = 400             # <--- Each episodes has a max. of 365 days of run (determined by max. simulation run)
-    update_timestep = 200
+    update_timestep = 400
 
     time_step = 0
 
