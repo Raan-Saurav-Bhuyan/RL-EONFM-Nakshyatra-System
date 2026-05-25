@@ -38,3 +38,10 @@ MAX_SIMULATION_STEPS = 365 # Corresponds to one year of daily monitoring
 # Soft Failure Simulation: --->
 FAILURE_PROBABILITY = 0.05  # Probability of a new soft failure event per step
 DEGRADATION_PER_EVENT_DB = 0.5 # How much a link's quality degrades in one event (dB)
+STATIC_FAILURE_EDGES = [(1, 2),  (7, 8), (12, 13), (5, 7), (3, 1), (1, 8), (2, 5), (11, 19)] # Static links to inject failures for RL testing
+
+# RL and Surrogate Reward Parameters: --->
+N_CLUSTERS = 22               # Fixed number of clusters for the state vector (roughly 1 per link)
+HISTORY_WINDOW = 10            # Number of historical states to stack
+T_EVAL_STEPS = 10              # No longer strictly needed with instant evaluation
+GRADIENT_EPSILON = 0.01       # Minimum dB improvement required to consider stabilization successful
