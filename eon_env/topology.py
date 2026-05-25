@@ -64,6 +64,25 @@ class NetworkTopology:
         """Restores traffic to all links."""
         self.isolated_link_idx = -1
 
+    def _get_link_degradation(self, u: int, v: int) -> float:
+        """
+        Helper to get the degradation factor for a specific link, handling undirected edges.
+        """
+        if (u, v) in self.graph.edges:
+            return self.graph[u][v]['degradation_factor_db']
+        elif (v, u) in self.graph.edges:
+            return self.graph[v][u]['degradation_factor_db']
+        return 0.0 # Should not happen for valid links
+
+    def _set_link_degradation(self, u: int, v: int, value: float):
+        """
+        Helper to set the degradation factor for a specific link, handling undirected edges.
+        """
+        if (u, v) in self.graph.edges:
+            self.graph[u][v]['degradation_factor_db'] = value
+        elif (v, u) in self.graph.edges:
+            self.graph[v][u]['degradation_factor_db'] = value
+
     def get_path_properties(self, path: list) -> dict:
         """Calculates total length and spans for a given path."""
         total_length_km = 0

@@ -85,8 +85,11 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
             current_gsnr = self._get_network_mean_gsnr(raw_obs)
 
             # Minor penalty if network is actively degrading and we just wait: --->
-            grad = current_gsnr - self.baseline_gsnr
-            reward = 0.0 if grad >= -0.1 else -0.1
+            grad = current_gsnr - self.baseline_gsnr # Negative if degrading
+            if grad < 0:                        # <--- Network is degrading
+                reward = max(const.MAX_MONITOR_PENALTY, grad * const.MONITOR_PENALTY_FACTOR)
+            else:
+                reward = 0.0                 # <--- No degradation, no penalty for monitoring
 
             self.baseline_gsnr = current_gsnr
             self.state_history.append(self._extract_features(raw_obs))
@@ -98,17 +101,44 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
             suspect_edge_idx = action - 1
             self.unwrapped.topology.isolate_link(suspect_edge_idx)
 
-            # Immediately recalculate metrics without advancing time to prevent random noise: --->
+            # Get the (u,v) tuple for the suspected link: --->
+            suspect_u, suspect_v = self.unwrapped.topology.edges_list[suspect_edge_idx]
+
+            # 1. Store current degradation of the suspected link: --->
+            original_suspect_degradation = self.unwrapped.topology._get_link_degradation(suspect_u, suspect_v)
+
+            # 2. Calculate hypothetical GSNR if the suspected link was fixed (all other degradation remains): --->
+            # (Temporarily set degradation of suspected link to 0)
+            self.unwrapped.topology._set_link_degradation(suspect_u, suspect_v, 0.0)
             self.unwrapped._update_all_opm_metrics()
-            eval_obs = self.unwrapped._get_observation()
+            hypothetical_obs = self.unwrapped._get_observation()
+            hypothetical_gsnr_if_correct = self._get_network_mean_gsnr(hypothetical_obs)
+
+            # Restore original degradation: --->
+            self.unwrapped.topology._set_link_degradation(suspect_u, suspect_v, original_suspect_degradation)
+
+            # Step environment forward by T_EVAL_STEPS to evaluate the physical gradient impact over time: --->
+            for _ in range(const.T_EVAL_STEPS):
+                eval_obs, _, env_terminated, env_truncated, _ = self.env.step(0)
+                if env_terminated or env_truncated:
+                    break
+
             eval_gsnr = self._get_network_mean_gsnr(eval_obs)
 
-            # Surrogate Reward Calculation: Did removing the link stop the degradation?
-            delta_gsnr = eval_gsnr - self.baseline_gsnr
-            if delta_gsnr >= const.GRADIENT_EPSILON:
-                reward = const.POS_REWARD               # <--- Success! Stabilization achieved.
+            # Surrogate Reward Calculation: Did isolating the link achieve the same GSNR as if it were perfectly fixed?
+            # This decouples the reward from other background degradations. --->
+            diff = abs(eval_gsnr - hypothetical_gsnr_if_correct)
+
+            if diff < const.GRADIENT_EPSILON:
+                reward = const.POS_REWARD  # Near-perfect localization
+            elif diff > const.MAX_DIFFERENCE_FOR_PARTIAL_REWARD:
+                reward = const.NEG_REWARD  # Significant mislocalization
             else:
-                reward = const.NEG_REWARD               # <--- Failure! Mislocalization, degradation continued.
+                # Interpolate reward between POS_REWARD and NEG_REWARD
+                # As diff increases from GRADIENT_EPSILON to MAX_DIFFERENCE_FOR_PARTIAL_REWARD,
+                # reward decreases from POS_REWARD to NEG_REWARD.
+                scaled_diff = (diff - const.GRADIENT_EPSILON) / (const.MAX_DIFFERENCE_FOR_PARTIAL_REWARD - const.GRADIENT_EPSILON)
+                reward = const.POS_REWARD - scaled_diff * (const.POS_REWARD - const.NEG_REWARD)
 
             # Restore the link and metrics: --->
             self.unwrapped.topology.unisolate_all()

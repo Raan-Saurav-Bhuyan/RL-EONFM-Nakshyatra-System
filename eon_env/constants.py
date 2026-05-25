@@ -37,11 +37,16 @@ MAX_SIMULATION_STEPS = 365 # Corresponds to one year of daily monitoring
 
 # Soft Failure Simulation: --->
 FAILURE_PROBABILITY = 0.05  # Probability of a new soft failure event per step
-DEGRADATION_PER_EVENT_DB = 0.5 # How much a link's quality degrades in one event (dB)
-STATIC_FAILURE_EDGES = [(1, 2),  (7, 8), (12, 13), (5, 7), (3, 1), (1, 8), (2, 5), (11, 19)] # Static links to inject failures for RL testing
+DEGRADATION_PER_EVENT_DB = 0.05 # How much a link's quality degrades in one event (dB)
+STATIC_FAILURE_EDGES = [(1, 2), (6, 11), (10, 13), (5, 8), (2, 5)] # Static links to inject failures for RL testing
 
 # RL and Surrogate Reward Parameters: --->
-N_CLUSTERS = 22               # Fixed number of clusters for the state vector (roughly 1 per link)
-HISTORY_WINDOW = 10            # Number of historical states to stack
-T_EVAL_STEPS = 10              # No longer strictly needed with instant evaluation
-GRADIENT_EPSILON = 0.01       # Minimum dB improvement required to consider stabilization successful
+N_CLUSTERS = 21               # Fixed number of clusters for the state vector (roughly 1 per link)
+HISTORY_WINDOW = 7            # Number of historical states to stack
+T_EVAL_STEPS = 100            # Number of days to evaluate physical gradient after rerouting
+GRADIENT_EPSILON = 0.001       # Minimum dB improvement required to consider stabilization successful
+MAX_DIFFERENCE_FOR_PARTIAL_REWARD = 0.1 # Max GSNR diff (dB) for a non-negative localization reward
+POS_REWARD = 10
+NEG_REWARD = -5
+MAX_MONITOR_PENALTY = -2.0    # Maximum penalty for monitoring when degradation is severe
+MONITOR_PENALTY_FACTOR = 20.0 # Factor to scale degradation magnitude into monitor penalty

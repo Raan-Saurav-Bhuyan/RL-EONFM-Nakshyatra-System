@@ -25,8 +25,8 @@ if __name__ == '__main__':
     writer = SummaryWriter(log_dir="runs/ppo_eon_training")
 
     max_episodes = 1000
-    max_steps = 5000
-    update_timestep = 100
+    max_steps = 400             # <--- Each episodes has a max. of 365 days of run (determined by max. simulation run)
+    update_timestep = 200
 
     time_step = 0
 
@@ -35,6 +35,7 @@ if __name__ == '__main__':
         ep_reward = 0
 
         for step in range(max_steps):
+            print(f"\nStep = {step}")
             time_step += 1
             action = agent.select_action(state)
 
