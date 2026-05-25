@@ -1,6 +1,7 @@
 import numpy as np
 from .lsh import LSH
 from .preprocessing import StandardScaler
+from eon_env import constants as const
 
 class LSHClusterManager:
     """
@@ -16,6 +17,7 @@ class LSHClusterManager:
         """
         self.scaler = StandardScaler()
         self.lsh = LSH(input_dim, num_functions_k, seed)
+        self.fixed_signatures = []
 
     def fit_predict(self, observations):
         """
@@ -28,15 +30,61 @@ class LSHClusterManager:
             list: A list of lists, where each inner list contains the indices
                   of lightpaths belonging to a specific cluster.
         """
-        # Normalize the observations to ensure Euclidean distance is meaningful
+        # Normalize the observations to ensure Euclidean distance is meaningful: --->
         # across different units (dB, s/m^2, s).
         norm_obs = self.scaler.fit_transform(observations)
 
-        # Perform LSH clustering
+        # Perform LSH clustering: --->
         cluster_map = self.lsh.cluster(norm_obs)
 
-        # Extract just the groups of indices
+        # Extract just the groups of indices: --->
         clusters = list(cluster_map.values())
+
+        return clusters
+
+    def fit(self, observations):
+        """
+        Fits the LSH and establishes fixed cluster identities for RL state consistency.
+        """
+        norm_obs = self.scaler.fit_transform(observations)
+        self.lsh.fit(norm_obs)
+
+        hashes = self.lsh.compute_hashes(norm_obs)
+        unique_hashes = list(set(tuple(h) for h in hashes))
+
+        # Ensure deterministic ordering: --->
+        self.fixed_signatures = sorted(unique_hashes)
+
+        # Pad or truncate to ensure strictly N_CLUSTERS for the RL state shape: --->
+        if len(self.fixed_signatures) > const.N_CLUSTERS:
+            self.fixed_signatures = self.fixed_signatures[:const.N_CLUSTERS]
+        else:
+            while len(self.fixed_signatures) < const.N_CLUSTERS:
+                # Create a dummy signature that won't match anything naturally: --->
+                dummy_sig = tuple([-1] * self.lsh.k + [len(self.fixed_signatures)])
+                self.fixed_signatures.append(dummy_sig)
+
+    def predict(self, observations):
+        """
+        Clusters observations mapping them to the fixed signatures.
+        """
+        if not getattr(self, 'fixed_signatures', None):
+            self.fit(observations)
+
+        norm_obs = self.scaler.transform(observations)
+        hashes = self.lsh.compute_hashes(norm_obs)
+
+        # Initialize fixed size cluster list: --->
+        clusters = [[] for _ in range(const.N_CLUSTERS)]
+
+        for idx, h in enumerate(hashes):
+            sig = tuple(h)
+            if sig in self.fixed_signatures:
+                c_idx = self.fixed_signatures.index(sig)
+                clusters[c_idx].append(idx)
+            else:
+                # If unseen signature, map to nearest (for simplicity, map to cluster 0): --->
+                clusters[0].append(idx)
 
         return clusters
 
@@ -48,6 +96,7 @@ class LSHClusterManager:
         centroids = []
         for cluster_indices in clusters:
             cluster_data = observations[cluster_indices]
-            centroid = np.mean(cluster_data, axis=0)
+            centroid = np.mean(cluster_data, axis = 0)
             centroids.append(centroid)
+
         return np.array(centroids)

@@ -18,17 +18,11 @@ class LSH:
         self.k = num_functions_k
         self.rng = np.random.default_rng(seed)
         self.a = None
+        self.is_fitted = False          # <--- Check whether the clustering has run or not to keep the clusters static
 
-    def compute_hashes(self, X):
+    def fit(self, X):
         """
-        Computes the hash signatures for the input vectors X using PCA-guided
-        projections to minimize the required number of hash functions.
-
-        Args:
-            X (np.ndarray): Input matrix of shape (N, d).
-
-        Returns:
-            np.ndarray: Hash signatures matrix of shape (N, k).
+        Calculates the PCA-guided SimHash projection matrix based on baseline data.
         """
         # 1. PCA-Guided Hashing: Calculate Covariance Matrix: --->
         cov = np.cov(X, rowvar=False)
@@ -48,13 +42,20 @@ class LSH:
 
         # 5. Scale eigenvectors: a_i = v_i / sqrt(lambda_i): --->
         scaling = 1.0 / np.sqrt(np.maximum(top_evals, 1e-10))
-        a_pca = (top_evecs * scaling).T  # Shape: (actual_k, input_dim)
+        a_pca = (top_evecs * scaling).T             # <--- Shape: (actual_k, input_dim)
 
         if self.k > self.input_dim:
             a_random = self.rng.standard_normal((self.k - self.input_dim, self.input_dim))
             self.a = np.vstack([a_pca, a_random])
         else:
             self.a = a_pca
+
+        self.is_fitted = True
+
+    def compute_hashes(self, X):
+        """Projects inputs into binary hashes using the fitted matrix."""
+        if not self.is_fitted:
+            self.fit(X)
 
         # Projection: (N, d) . (d, k) -> (N, k): --->
         projections = np.dot(X, self.a.T)
