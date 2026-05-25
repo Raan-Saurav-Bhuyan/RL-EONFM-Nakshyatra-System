@@ -41,10 +41,10 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
 
-        # Fit LSH on the healthy baseline network state
+        # Fit LSH on the healthy baseline network state: --->
         self.lsh_manager.fit(obs)
 
-        # Clear history and populate with initial states
+        # Clear history and populate with initial states: --->
         agg_state = self._extract_features(obs)
         for _ in range(const.HISTORY_WINDOW):
             self.state_history.append(agg_state)
@@ -60,7 +60,7 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
         cluster_features = []
         for cluster_indices in clusters:
             if not cluster_indices:
-                # Empty cluster padding
+                # Empty cluster padding: --->
                 cluster_features.append(np.zeros(self.features_per_cluster))
             else:
                 opm_matrix = raw_obs[cluster_indices]
@@ -80,11 +80,11 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
     def step(self, action):
         """Executes action, computes surrogate reward, and handles evaluation periods."""
         if action == 0:
-            # Monitor: standard single step progression
+            # Monitor: standard single step progression: --->
             raw_obs, reward, terminated, truncated, info = self.env.step(action)
             current_gsnr = self._get_network_mean_gsnr(raw_obs)
 
-            # Minor penalty if network is actively degrading and we just wait
+            # Minor penalty if network is actively degrading and we just wait: --->
             grad = current_gsnr - self.baseline_gsnr
             reward = 0.0 if grad >= -0.1 else -0.1
 
@@ -94,7 +94,7 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
             return self._get_historical_state(), reward, terminated, truncated, info
 
         else:
-            # Reroute / Isolation: Evaluate the physical gradient impact
+            # Reroute / Isolation: Evaluate the physical gradient impact: --->
             suspect_edge_idx = action - 1
             self.unwrapped.topology.isolate_link(suspect_edge_idx)
 
@@ -106,9 +106,9 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
             # Surrogate Reward Calculation: Did removing the link stop the degradation?
             delta_gsnr = eval_gsnr - self.baseline_gsnr
             if delta_gsnr >= const.GRADIENT_EPSILON:
-                reward = 10.0  # Success! Stabilization achieved.
+                reward = const.POS_REWARD               # <--- Success! Stabilization achieved.
             else:
-                reward = -10.0 # Failure! Mislocalization, degradation continued.
+                reward = const.NEG_REWARD               # <--- Failure! Mislocalization, degradation continued.
 
             # Restore the link and metrics: --->
             self.unwrapped.topology.unisolate_all()
@@ -118,5 +118,5 @@ class Surrogate_Reward_Wrapper(gym.ObservationWrapper):
 
             info = self.unwrapped._get_info()
 
-            # Reroute actions always terminate the diagnostic episode
+            # Reroute actions always terminate the diagnostic episode: --->
             return self._get_historical_state(), reward, True, False, info

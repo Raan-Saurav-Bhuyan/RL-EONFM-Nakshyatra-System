@@ -2,7 +2,6 @@ import gymnasium as gym
 import numpy as np
 import time
 import warnings
-import torch
 
 # Import custom modules: --->
 import eon_env                                      # <--- Registers the EON-v0 environment
