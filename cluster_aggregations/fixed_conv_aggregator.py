@@ -86,14 +86,15 @@ class FixedConvAggregator(nn.Module):
         # Convert to PyTorch tensor: --->
         opm_tensor = torch.from_numpy(cluster_opm_matrix).float()
 
-        # Reshape for Conv1d: (N, M) -> (1, N, M) -> (1, M, N): --->
-        # (batch_size, channels, length)
-        opm_tensor = opm_tensor.unsqueeze(0).permute(0, 2, 1)
+        with torch.no_grad():
+            # Reshape for Conv1d: (N, M) -> (1, N, M) -> (1, M, N): --->
+            # (batch_size, channels, length)
+            opm_tensor = opm_tensor.unsqueeze(0).permute(0, 2, 1)
 
-        # Apply the fixed convolutional filters: --->
-        # Input: (1, num_metrics, num_lightpaths)
-        # Output: (1, num_metrics * num_filters, num_lightpaths)
-        feature_maps = self.conv_layer(opm_tensor)
+            # Apply the fixed convolutional filters: --->
+            # Input: (1, num_metrics, num_lightpaths)
+            # Output: (1, num_metrics * num_filters, num_lightpaths)
+            feature_maps = self.conv_layer(opm_tensor)
 
         # Aggregate features across all lightpaths using max pooling: --->
         # Input: (1, num_metrics * num_filters, num_lightpaths)

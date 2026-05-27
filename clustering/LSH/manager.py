@@ -18,6 +18,7 @@ class LSHClusterManager:
         self.scaler = StandardScaler()
         self.lsh = LSH(input_dim, num_functions_k, seed)
         self.fixed_signatures = []
+        self.signature_to_id = {}
 
     def fit_predict(self, observations):
         """
@@ -64,6 +65,9 @@ class LSHClusterManager:
                 dummy_sig = tuple([-1] * self.lsh.k + [len(self.fixed_signatures)])
                 self.fixed_signatures.append(dummy_sig)
 
+        # Create a fast lookup map: --->
+        self.signature_to_id = {sig: i for i, sig in enumerate(self.fixed_signatures)}
+
     def predict(self, observations):
         """
         Clusters observations mapping them to the fixed signatures.
@@ -79,11 +83,12 @@ class LSHClusterManager:
 
         for idx, h in enumerate(hashes):
             sig = tuple(h)
-            if sig in self.fixed_signatures:
-                c_idx = self.fixed_signatures.index(sig)
+            # Fast O(1) lookup instead of O(N) list search: --->
+            c_idx = self.signature_to_id.get(sig)
+            if c_idx is not None:
                 clusters[c_idx].append(idx)
             else:
-                # If unseen signature, map to nearest (for simplicity, map to cluster 0): --->
+                # Fallback for drifted signatures: --->
                 clusters[0].append(idx)
 
         return clusters
