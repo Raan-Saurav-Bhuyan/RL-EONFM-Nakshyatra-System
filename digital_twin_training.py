@@ -7,7 +7,7 @@ except ImportError:
 # Import custom modules: --->
 import gymnasium as gym
 import eon_env
-from eon_env.rl_wrapper import Surrogate_Reward_Wrapper
+from eon_env.v1.rl_wrapper import Surrogate_Reward_Wrapper
 from PPO import PPOAgent
 
 if __name__ == '__main__':

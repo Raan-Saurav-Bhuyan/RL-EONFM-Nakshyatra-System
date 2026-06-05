@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import networkx as nx
 
-from eon_env.topology import NetworkTopology
+from eon_env.v1.topology import NetworkTopology
 
 
 def visualize_nsfnet_topology():

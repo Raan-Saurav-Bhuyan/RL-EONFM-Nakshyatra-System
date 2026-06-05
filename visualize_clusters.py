@@ -6,7 +6,7 @@ import time
 import warnings
 
 import eon_env
-from eon_env import constants as const
+from eon_env.v1 import constants as const
 
 from clustering.LSH import LSHClusterManager, StandardScaler
 from clustering.similarity_learning import SimilarityClusterManager
@@ -76,17 +76,6 @@ def visualize_clusters_pca(observations, clusters, engine_name):
 
 
 if __name__ == '__main__':
-    # parser = argparse.ArgumentParser(
-    #     description="Run and visualize lightpath clustering from different engines."
-    # )
-    # parser.add_argument(
-    #     'engine',
-    #     type=str,
-    #     choices=['lsh', 'similarity', 'contrastive'],
-    #     help="The clustering engine to use: 'lsh', 'similarity', or 'contrastive'."
-    # )
-    # args = parser.parse_args()
-
     # 1. Run EON environment simulation to get OPM data: --->
     env = gym.make('EON-v0')
     observation, info = env.reset()
@@ -101,14 +90,14 @@ if __name__ == '__main__':
     # 2. Initialize and run the selected clustering engine: --->
     input_dim = observation.shape[1]
     manager = None
-    engine_name = 'similarity'
+    engine_name = 'lsh'
 
     print(f"--- Initializing {engine_name.capitalize()} Clustering Engine ---")
     start_time = time.time()
 
     if engine_name == 'lsh':
         manager = LSHClusterManager(
-            input_dim = input_dim, num_functions_k = 8, window_size_w = 3.0
+            input_dim = input_dim, num_functions_k = 8
         )
     elif engine_name == 'similarity':
         manager = SimilarityClusterManager(

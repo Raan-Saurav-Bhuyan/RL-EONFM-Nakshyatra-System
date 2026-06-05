@@ -3,7 +3,7 @@ import numpy as np
 
 import eon_env                                                  # <--- Registers the EON-v0 environment
 from clustering.LSH import LSHClusterManager
-from eon_env import constants as const
+from eon_env.v1 import constants as const
 
 
 def analyze_cluster_purity(clusters, lightpath_details):
@@ -69,7 +69,6 @@ if __name__ == '__main__':
     lsh_manager = LSHClusterManager(
         input_dim = observation.shape[1],
         num_functions_k = 8,                    # <--- More functions -> finer-grained clusters
-        window_size_w = 3.0                     # <--- Larger window -> more collisions, broader clusters
     )
 
     # Perform clustering on the final OPM observation matrix: --->

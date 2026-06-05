@@ -4,7 +4,7 @@ import warnings
 
 import eon_env                                                                          # <--- Registers the EON-v0 environment
 from clustering.similarity_learning import SimilarityClusterManager
-from eon_env import constants as const
+from eon_env.v1 import constants as const
 
 # Suppress RuntimeWarning from nan-handling in centroid calculation for empty clusters: --->
 warnings.filterwarnings("ignore", category = RuntimeWarning, message = "Mean of empty slice")

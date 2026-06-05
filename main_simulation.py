@@ -5,7 +5,7 @@ import warnings
 
 # Import custom modules: --->
 import eon_env                                      # <--- Registers the EON-v0 environment
-from eon_env import constants as const
+from eon_env.v1 import constants as const
 from visualize_clusters import visualize_clusters_pca
 
 # Import all clustering managers: --->

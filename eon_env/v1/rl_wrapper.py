@@ -3,7 +3,7 @@ from gymnasium import spaces
 import numpy as np
 from collections import deque
 
-from eon_env import constants as const
+from eon_env.v1 import constants as const
 from clustering.LSH import LSHClusterManager
 from cluster_aggregations import FixedConvAggregator
 

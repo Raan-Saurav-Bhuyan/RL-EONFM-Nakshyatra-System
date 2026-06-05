@@ -1,7 +1,7 @@
 import numpy as np
 from .lsh import LSH
 from .preprocessing import StandardScaler
-from eon_env import constants as const
+from eon_env.v1 import constants as const
 
 class LSHClusterManager:
     """
