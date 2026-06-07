@@ -40,12 +40,12 @@ def visualize_v2_topology(json_path = "nsfnet.json"):
     nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, ax=ax,
                                  font_color='darkred', font_size=8)
 
-    ax.set_title("V2 SDM & Flex-Grid Topology Visualization", fontsize=20, fontweight='bold')
+    ax.set_title("SDM & Flex-Grid EON NSFNET Topology", fontsize = 20, fontweight = 'bold')
     fig.tight_layout()
     plt.axis('off')
 
-    out_file = "visualizations/v2_nsfnet_topology.png"
-    plt.savefig(out_file, dpi=300, bbox_inches='tight')
+    out_file = "visualizations/nsfnet_topology_V2.png"
+    plt.savefig(out_file, dpi = 300, bbox_inches = 'tight')
     print(f"Network topology visualization successfully saved to '{out_file}'")
 
 if __name__ == '__main__':
