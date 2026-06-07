@@ -22,9 +22,9 @@ EDFA_NF = 5.5                                # Noise Figure in dB
 EDFA_TARGET_GAIN = 20.0            # Target gain in dB
 
 # 3. Simulation & Soft Failure Parameters: --->
-MAX_SIMULATION_DAYS = 365                  # Number of days to simulate the network run
+MAX_SIMULATION_DAYS = 3650                 # Expanded to a decade for predictive maintenance
 NUM_LIGHTPATHS = 800                            # Number of lightpaths to provision
-FAILURE_PROBABILITY_PER_DAY = 0.02
+FAILURE_PROBABILITY_PER_DAY = 0.001             # Lowered for a 10-year realistic degradation curve
 DEGRADATION_STEP_FIBER_LOSS = 0.05    # dB/km increase per failure event
 DEGRADATION_STEP_AMP_NF = 0.1           # dB increase per failure event
 DEGRADATION_STEP_PMD = 0.01               # ps/sqrt(km) increase per event
