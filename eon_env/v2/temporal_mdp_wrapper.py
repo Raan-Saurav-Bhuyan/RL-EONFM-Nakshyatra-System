@@ -48,6 +48,7 @@ class TemporalEONEnvV2(gym.Env):
         self.initial_gsnr = 0.0
         self.final_gsnr = 0.0
         self.final_failed_lightpaths = 0
+        self.simulated_years = 10
 
     def _get_active_telemetry(self) -> np.ndarray:
         """Extracts OPM telemetry for active services."""
@@ -100,7 +101,7 @@ class TemporalEONEnvV2(gym.Env):
 
     def reset(self, seed = None, options = None):
         """
-        Runs a full decade (3650 days) of simulation to populate the sliding window.
+        Runs a max. of two full decades (3650 * 2 days) of simulation to populate the sliding window.
         This establishes the MDP state for the RL agent.
         """
         super().reset(seed = seed)
@@ -121,8 +122,13 @@ class TemporalEONEnvV2(gym.Env):
         telemetry = self._get_active_telemetry()
         self.initial_gsnr = np.mean(telemetry[:, 0]) if telemetry.shape[0] > 0 else 0.0
 
-        # Simulate 10 years, snapshotting state every 365 days: --->
-        for year in range(self.years_window):
+        # Randomize episode length between 10 and 20 years to teach the agent patience: --->
+        self.simulated_years = np.random.randint(10, 21)
+        # Fix episode length to 10 years: --->
+        # self.simulated_years = 10
+
+        # Simulate randomly chosen years, snapshotting state every 365 days: --->
+        for year in range(self.simulated_years):
             for day in range(365):
                 self.simulator.step()
 
@@ -136,7 +142,10 @@ class TemporalEONEnvV2(gym.Env):
         # Hard failure threshold generally considered around Pre-FEC BER 1e-2 for generic models: --->
         self.final_failed_lightpaths = np.sum(telemetry[:, 5] > 0.01)
 
-        self.current_state = np.stack(temporal_window) # Shape: (10, 5, 18)
+        # Take the last 10 years of the temporal sequence to maintain static CNN input dimensions: --->
+        state_tensor = np.stack(temporal_window[-10:])
+
+        self.current_state = state_tensor # Shape: (10, 5, 18)
 
         return self.current_state, {}
 
@@ -148,24 +157,31 @@ class TemporalEONEnvV2(gym.Env):
         degradation = self.initial_gsnr - self.final_gsnr # Drop in dB
         reward = 0.0
 
-        if action == 0:                                                                                             # Passive Monitoring
+        if action == 0:
+            """ Passive monitoring """
             # Continuous penalty for ignored degradation and accumulated soft failures: --->
-            reward -= (degradation * 2.0)
-            reward -= (self.final_failed_lightpaths * 5.0)
+            if degradation > 0.5 or self.final_failed_lightpaths > 0:
+                # Normalized penalty based on percentage of network affected: --->
+                reward -= (degradation * 2.0)
+                reward -= (self.final_failed_lightpaths / const.NUM_LIGHTPATHS) * 50.0
+            else:
+                # Small positive reward for correctly deciding to monitor a healthy network: --->
+                reward += 2.0
 
-            if self.final_failed_lightpaths > (const.NUM_LIGHTPATHS * 0.1):             # 10% network failure
-                # Extreme penalty for ignoring an imminent hard failure: --->
-                reward -= 100.0
+            if self.final_failed_lightpaths > (const.NUM_LIGHTPATHS * 0.1):
+                reward -= 20.0
 
-        # Proactively Isolate / Maintenance: --->
         elif action == 1:
-            maintenance_opex = -20.0
-            if degradation < 1.5 and self.final_failed_lightpaths == 0:
+            """ Proactively Isolate / Maintenance """
+            # Increased relative cost to discourage "trigger-happy" behavior: --->
+            maintenance_opex = -5.0
 
+            if degradation < 0.5 and self.final_failed_lightpaths == 0:
                 # False Positive: Wasted maintenance OpEx: --->
-                reward = maintenance_opex
+                reward = maintenance_opex - 5.0
             else:
                 # True Positive: Saved the network. Reward scales with the severity of the averted disaster: --->
-                reward = maintenance_opex + (degradation * 10.0) + (self.final_failed_lightpaths * 15.0)
+                # (Normalized reward to prevent gradient explosion)
+                reward = maintenance_opex + (degradation * 2.0) + (self.final_failed_lightpaths / const.NUM_LIGHTPATHS) * 30.0
 
         return self.current_state, reward, True, False, {'degradation_db': degradation}

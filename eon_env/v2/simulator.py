@@ -3,6 +3,7 @@ from typing import Dict, List, Any
 from . import constants as const
 from .topology import NetworkTopology
 from .spectrum import SpectrumManager
+from .topology import FiberLayer, EDFA
 from .physical_model import GNPyPhysicalEngine
 from .soft_failures import SoftFailureInjector
 
@@ -37,8 +38,11 @@ class EONSimulatorV2:
         self.current_day = 0
         self.service_counter = 0
 
+        # Tracks ground truth: (type, u, v, span_idx, degradation_severity): --->
+        self.faulty_components = []
+
     def provision_service(self, src: str, dst: str, bitrate_gbps: float) -> bool:
-        """Provisions a superchannel incorporating Flex-grid and SDM contraints."""
+        """Provisions a superchannel incorporating Flex-grid and SDM constraints."""
         # Calculate required FSUs based on Baud Rate and Spectral Efficiency: --->
         required_fsus = math.ceil((const.BAUD_RATE_GBDS * 1e9) / (const.FSU_RESOLUTION_GHZ * 1e9))
 
@@ -65,7 +69,8 @@ class EONSimulatorV2:
 
                 return True
 
-        return False # Blocked due to resources or no path
+        # Blocked due to resources or no path: --->
+        return False
 
     def _update_service_opm(self, demand: ServiceDemand):
         """Updates physical OPM state utilizing GNPy underlying models."""
@@ -79,5 +84,27 @@ class EONSimulatorV2:
         """Advances network temporal state."""
         self.current_day += 1
         self.failure_injector.step()
+
+        # Update metrics after possible degradations: --->
         for demand in self.active_services:
-            self._update_service_opm(demand) # Update metrics after possible degradations
+            self._update_service_opm(demand)
+
+        # Sync ground truth faulty components for the RL Localization Agent --->
+        self._sync_faulty_components()
+
+    def _sync_faulty_components(self):
+        """Extracts the exact components experiencing soft failures for agent evaluation."""
+        self.faulty_components.clear()
+
+        # Scan physical components inside each link: --->
+        for u, v, data in self.topology.graph.edges(data=True):
+            link = data['link']
+            for span_idx, comp in enumerate(link.components):
+                if isinstance(comp, EDFA) and comp.nf > const.EDFA_NF:
+                    severity = comp.nf - const.EDFA_NF
+                    self.faulty_components.append(('EDFA', u, v, span_idx, severity))
+
+                elif isinstance(comp, FiberLayer):
+                    if comp.loss_coef > const.FIBER_ATTENUATION:
+                        severity = comp.loss_coef - const.FIBER_ATTENUATION
+                        self.faulty_components.append(('EDFA', u, v, span_idx, severity)) # Env treats fiber surges as link-level faults
