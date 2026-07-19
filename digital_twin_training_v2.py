@@ -1,15 +1,22 @@
 import os
 from datetime import datetime
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 from torch.utils.tensorboard import SummaryWriter
 
 # Import custom modules: --->
 from eon_env.v2.temporal_mdp_wrapper import TemporalEONEnvV2
 from eon_env.v2.localization_mdp_wrapper import ComponentLocalizationEnv
-from PPO.CNN_PPO import PPOAgentCNN
-from PPO.GNN_PPO.ppo_agent_gnn import PPOAgentGNN
+from PPO.CNN_PPO import PPOAgentCNN, DetectionEvalTracker
+from PPO.GNN_PPO import PPOAgentGNN, LocalizationEvalTracker
+
+# ═══════════════════════════════════════════════════════════════════
+# Kill-switch global variables for agent performance evaluation.
+# Set to False to disable the respective feature.
+# ═══════════════════════════════════════════════════════════════════
+DET_EVAL_ENABLED = True       # Enable/disable detection performance metrics collection + plotting
+DET_EVAL_TENSORBOARD = True   # Enable/disable TensorBoard logging of detection eval metrics
+LOC_EVAL_ENABLED = True       # Enable/disable localization performance metrics collection + plotting
+LOC_EVAL_TENSORBOARD = True   # Enable/disable TensorBoard logging of localization eval metrics
 
 if __name__ == '__main__':
     # Create directory for classification visualizations --->
@@ -31,9 +38,15 @@ if __name__ == '__main__':
     agent = PPOAgentCNN(action_dim = action_dim, save_dir = cnn_save_dir)
     gnn_agent = PPOAgentGNN(save_dir = gnn_save_dir)
 
+    # Detection agent performance evaluation tracker: --->
+    det_tracker = DetectionEvalTracker() if DET_EVAL_ENABLED else None
+
+    # Localization agent performance evaluation tracker: --->
+    loc_tracker = LocalizationEvalTracker() if LOC_EVAL_ENABLED else None
+
     # Initialize TensorBoard Writer with timestamp: --->
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    writer = SummaryWriter(log_dir=f"runs/ppo_cnn_eon_v2_{current_time}")
+    writer = SummaryWriter(log_dir=f"runs/ppo_eon_v2_{current_time}")
 
      # Training Hyperparameters: --->
     # (Note: In the V2 Temporal MDP, 1 'step' encapsulates 10-20 years of simulated operation.
@@ -44,10 +57,6 @@ if __name__ == '__main__':
     # Accumulate a small batch of episodes before updating the detection agent CNN=based PPO Actor-Critic RL agent
     # to stabilize gradients: --->
     update_timestep = 3
-
-    # Arrays to store tracking history for classification metrics: --->
-    y_true_binary = []
-    y_pred_binary = []
 
     print("\n--- Starting Pre-Training of CNN PPO Agent ---")
 
@@ -70,13 +79,22 @@ if __name__ == '__main__':
 
         # Retrieve diagnostic metrics: --->
         degradation = info.get('degradation_db', 0.0)
+        n_failed = info.get('n_failed_lightpaths', 0)
         action_name = "Isolate/Maintain" if action == 1 else "Monitor"
         print(f"Action Taken: {action_name} | Degradation: {degradation:.2f} dB | Reward: {reward:.2f}")
+
+        # Record episode for detection eval tracker: --->
+        if det_tracker is not None:
+            det_tracker.record_episode(ep, action, reward, degradation, n_failed)
 
         # Log metrics to TensorBoard: --->
         writer.add_scalar('Reward/Episode_Reward', reward, ep)
         writer.add_scalar('Environment/Degradation_dB', degradation, ep)
         writer.add_scalar('Action/Action_Chosen', action, ep)
+
+        # Log detection eval metrics to TensorBoard: --->
+        if det_tracker is not None and DET_EVAL_TENSORBOARD:
+            det_tracker.log_to_tensorboard(writer, ep)
 
         # Initialize and run the GNN Agent for Localization: --->
         if action == 1:
@@ -95,16 +113,21 @@ if __name__ == '__main__':
                 gnn_agent.buffer.rewards.append(loc_reward)
                 gnn_agent.buffer.is_terminals.append(loc_term or loc_trunc)
 
-                # Track performance strictly as binary task: hit (1) or miss (0) the fault: --->
-                is_faulty = l_info['is_faulty']
-                y_true_binary.append(1 if is_faulty else 0)
-
-                # Agent predicted this node had a fault by selecting it: --->
-                y_pred_binary.append(1)
+                # Record inspection step for localization eval tracker: --->
+                if loc_tracker is not None:
+                    loc_tracker.record_step(l_info['is_faulty'])
 
                 loc_state = next_loc_state
                 gnn_reward_sum += loc_reward
                 loc_done = loc_term or loc_trunc
+
+            # Finalize localization episode metrics: --->
+            if loc_tracker is not None:
+                loc_tracker.finalize_episode(gnn_reward_sum, loc_env.num_components, l_info['true_faults_count'])
+
+            # Log localization eval metrics to TensorBoard: --->
+            if loc_tracker is not None and LOC_EVAL_TENSORBOARD:
+                loc_tracker.log_to_tensorboard(writer, ep)
 
             writer.add_scalar('GNN_Agent/Reward', gnn_reward_sum, ep)
             print(f"GNN Agent finished with total reward: {gnn_reward_sum}")
@@ -114,6 +137,10 @@ if __name__ == '__main__':
             print("\n[Updating CNN Actor-Critic Networks...]")
             a_loss, c_loss, t_loss = agent.update()
             print(f"CNN Agent updated: Actor loss: {a_loss:.4f} | Critic loss: {c_loss:.4f} | Total loss: {t_loss:.4f}")
+
+            # Record PPO losses for detection eval tracker: --->
+            if det_tracker is not None:
+                det_tracker.record_losses(time_step, a_loss, c_loss, t_loss)
 
             # Log CNN-PPO losses: --->
             writer.add_scalar('CNN_Loss/Actor', a_loss, time_step)
@@ -126,6 +153,10 @@ if __name__ == '__main__':
                 g_a_loss, g_c_loss, g_t_loss = gnn_agent.update()
                 print(f"GNN Agent updated: Actor loss: {g_a_loss:.4f} | Critic loss: {g_c_loss:.4f} | Total loss: {g_t_loss:.4f}")
 
+                # Record GNN PPO losses for localization eval tracker: --->
+                if loc_tracker is not None:
+                    loc_tracker.record_losses(time_step, g_a_loss, g_c_loss, g_t_loss)
+
                 # Log GNN-PPO losses: --->
                 writer.add_scalar('GNN_Loss/Actor', g_a_loss, time_step)
                 writer.add_scalar('GNN_Loss/Critic', g_c_loss, time_step)
@@ -133,31 +164,13 @@ if __name__ == '__main__':
             else:
                 print("[Skipping GNN Update: No localization actions taken in this cycle]")
 
-    # Post-training Classification Analytics for GNN Agent --->
-    if y_true_binary:
-        print("\n--- Generating Classification Metrics for GNN Localization Agent ---")
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            y_true_binary, y_pred_binary, average='binary', zero_division=0
-        )
-        acc = accuracy_score(y_true_binary, y_pred_binary)
+    # Post-training: Generate detection agent performance evaluation plots: --->
+    if det_tracker is not None:
+        det_tracker.generate_plots("visualizations/detection_plots")
 
-        metrics_dict = {'Precision': precision, 'Recall': recall, 'F1-Score': f1, 'Accuracy': acc}
-
-        # Matplotlib visualization: --->
-        fig, ax = plt.subplots(figsize = (8, 5))
-        bars = ax.bar(metrics_dict.keys(), metrics_dict.values(), color = ['blue', 'orange', 'green', 'red'])
-
-        ax.set_ylim(0, 1.1)
-        ax.set_title('GNN Agent: Spatial Fault Localization Performance')
-
-        for bar in bars:
-            yval = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2, yval + 0.02, round(yval, 3), ha = 'center', va = 'bottom')
-
-        # Save Matplotlib visualization as PNG images inside the specified directory: --->
-        plot_path = f"visualizations/classification_metrics/gnn_performance_{current_time}.png"
-        plt.savefig(plot_path)
-        print(f"Classification metrics visualization saved to {plot_path}")
+    # Post-training: Generate localization agent performance evaluation plots: --->
+    if loc_tracker is not None:
+        loc_tracker.generate_plots("visualizations/classification_plots")
 
     writer.close()
 

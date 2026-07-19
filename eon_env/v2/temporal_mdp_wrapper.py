@@ -184,4 +184,7 @@ class TemporalEONEnvV2(gym.Env):
                 # (Normalized reward to prevent gradient explosion)
                 reward = maintenance_opex + (degradation * 2.0) + (self.final_failed_lightpaths / const.NUM_LIGHTPATHS) * 30.0
 
-        return self.current_state, reward, True, False, {'degradation_db': degradation}
+        return self.current_state, reward, True, False, {
+            'degradation_db': degradation,
+            'n_failed_lightpaths': int(self.final_failed_lightpaths),
+        }
