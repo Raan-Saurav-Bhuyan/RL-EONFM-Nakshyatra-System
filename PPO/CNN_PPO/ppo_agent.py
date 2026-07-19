@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -19,12 +20,17 @@ class RolloutBuffer:
         self.is_terminals.clear()
 
 class PPOAgentCNN:
-    """CNN-backed Proximal Policy Optimization Agent."""
-    def __init__(self, action_dim = 2, lr_actor = 3e-4, lr_critic = 1e-3, gamma=0.99, K_epochs = 4, eps_clip = 0.2):
+    """CNN-backed Proximal Policy Optimization Agent with best-model checkpointing."""
+    def __init__(self, action_dim = 2, lr_actor = 1e-4, lr_critic = 3e-4, gamma=0.99, K_epochs = 10, eps_clip = 0.2, save_dir = "models/CNN_PPO"):
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.buffer = RolloutBuffer()
+
+        # Model checkpoint directory and best-loss tracker: --->
+        self.save_dir = save_dir
+        os.makedirs(self.save_dir, exist_ok = True)
+        self.best_total_loss = float('inf')
 
         self.policy = ActorCriticCNN(action_dim = action_dim)
         self.optimizer = optim.Adam([
@@ -95,4 +101,43 @@ class PPOAgentCNN:
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.buffer.clear()
 
-        return actor_loss_val / self.K_epochs, critic_loss_val / self.K_epochs, total_loss_val / self.K_epochs
+        avg_total_loss = total_loss_val / self.K_epochs
+        avg_actor_loss = actor_loss_val / self.K_epochs
+        avg_critic_loss = critic_loss_val / self.K_epochs
+
+        # Best-model checkpointing based on minimum total loss: --->
+        if avg_total_loss < self.best_total_loss:
+            prev_best = self.best_total_loss
+            self.best_total_loss = avg_total_loss
+
+            checkpoint_path = os.path.join(self.save_dir, "best_cnn_ppo.pt")
+            torch.save({
+                'policy_state_dict': self.policy.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'best_total_loss': self.best_total_loss,
+                'actor_loss': avg_actor_loss,
+                'critic_loss': avg_critic_loss,
+                'total_loss': avg_total_loss,
+            }, checkpoint_path)
+
+            prev_str = f"{prev_best:.4f}" if prev_best != float('inf') else "inf"
+            print(f"[CNN-PPO] New best model saved → {checkpoint_path}\n\t(total_loss: {avg_total_loss:.4f} < prev: {prev_str})")
+
+        return avg_actor_loss, avg_critic_loss, avg_total_loss
+
+    def load_best_model(self, path=None):
+        """Load a previously saved best-model checkpoint."""
+        if path is None:
+            path = os.path.join(self.save_dir, "best_cnn_ppo.pt")
+
+        if not os.path.isfile(path):
+            print(f"[CNN-PPO] No checkpoint found at {path}")
+            return
+
+        checkpoint = torch.load(path, weights_only=False)
+        self.policy.load_state_dict(checkpoint['policy_state_dict'])
+        self.policy_old.load_state_dict(checkpoint['policy_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.best_total_loss = checkpoint['best_total_loss']
+
+        print(f"[CNN-PPO] Loaded best model from {path}\n\t(best_total_loss: {self.best_total_loss:.4f})")

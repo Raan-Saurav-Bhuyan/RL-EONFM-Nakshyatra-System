@@ -13,7 +13,13 @@ from PPO.GNN_PPO.ppo_agent_gnn import PPOAgentGNN
 
 if __name__ == '__main__':
     # Create directory for classification visualizations --->
-    os.makedirs("visualizations/classification_metrics", exist_ok=True)
+    os.makedirs("visualizations/classification_metrics", exist_ok = True)
+
+    # Create directories for best-model checkpoints: --->
+    cnn_save_dir = "models/CNN_PPO"
+    gnn_save_dir = "models/GNN_PPO"
+    os.makedirs(cnn_save_dir, exist_ok = True)
+    os.makedirs(gnn_save_dir, exist_ok = True)
 
     # Initialize Temporal MDP Environment for Predictive Maintenance: --->
     env = TemporalEONEnvV2()
@@ -22,8 +28,8 @@ if __name__ == '__main__':
     action_dim = env.action_space.n
 
     print(f"Initialized CNN-PPO Agent | State Shape: {state_dim_shape} | Action Dim: {action_dim}")
-    agent = PPOAgentCNN(action_dim = action_dim)
-    gnn_agent = PPOAgentGNN()
+    agent = PPOAgentCNN(action_dim = action_dim, save_dir = cnn_save_dir)
+    gnn_agent = PPOAgentGNN(save_dir = gnn_save_dir)
 
     # Initialize TensorBoard Writer with timestamp: --->
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -33,7 +39,7 @@ if __name__ == '__main__':
     # (Note: In the V2 Temporal MDP, 1 'step' encapsulates 10-20 years of simulated operation.
     # The environment immediately terminates after evaluating the predictive maintenance action.)
     time_step = 0
-    max_episodes = 100
+    max_episodes = 500
 
     # Accumulate a small batch of episodes before updating the detection agent CNN=based PPO Actor-Critic RL agent
     # to stabilize gradients: --->
@@ -107,9 +113,9 @@ if __name__ == '__main__':
         if time_step % update_timestep == 0:
             print("\n[Updating CNN Actor-Critic Networks...]")
             a_loss, c_loss, t_loss = agent.update()
-            print(f"CNN Agent updated: Actor loss: {a_loss:.4f} | Critic loss: {c_loss:.4f}")
+            print(f"CNN Agent updated: Actor loss: {a_loss:.4f} | Critic loss: {c_loss:.4f} | Total loss: {t_loss:.4f}")
 
-            # Log losses: --->
+            # Log CNN-PPO losses: --->
             writer.add_scalar('CNN_Loss/Actor', a_loss, time_step)
             writer.add_scalar('CNN_Loss/Critic', c_loss, time_step)
             writer.add_scalar('CNN_Loss/Total', t_loss, time_step)
@@ -118,6 +124,11 @@ if __name__ == '__main__':
             if len(gnn_agent.buffer.states) > 0:
                 print("[Updating GNN Actor-Critic Networks...]")
                 g_a_loss, g_c_loss, g_t_loss = gnn_agent.update()
+                print(f"GNN Agent updated: Actor loss: {g_a_loss:.4f} | Critic loss: {g_c_loss:.4f} | Total loss: {g_t_loss:.4f}")
+
+                # Log GNN-PPO losses: --->
+                writer.add_scalar('GNN_Loss/Actor', g_a_loss, time_step)
+                writer.add_scalar('GNN_Loss/Critic', g_c_loss, time_step)
                 writer.add_scalar('GNN_Loss/Total', g_t_loss, time_step)
             else:
                 print("[Skipping GNN Update: No localization actions taken in this cycle]")
@@ -149,4 +160,25 @@ if __name__ == '__main__':
         print(f"Classification metrics visualization saved to {plot_path}")
 
     writer.close()
-    print("\n--- Pre-Training Complete ---")
+
+    # Final summary of best model checkpoints: --->
+    print("\n" + "=" * 70)
+    print("                    TRAINING COMPLETE — MODEL SUMMARY")
+    print("=" * 70)
+
+    cnn_ckpt = os.path.join(cnn_save_dir, "best_cnn_ppo.pt")
+    if os.path.isfile(cnn_ckpt):
+        print(f"  [CNN-PPO] Best checkpoint : {cnn_ckpt}")
+        print(f"             Best total loss: {agent.best_total_loss:.6f}")
+    else:
+        print(f"  [CNN-PPO] No checkpoint saved (best_total_loss never improved).")
+
+    gnn_ckpt = os.path.join(gnn_save_dir, "best_gnn_ppo.pt")
+    if os.path.isfile(gnn_ckpt):
+        print(f"  [GNN-PPO] Best checkpoint : {gnn_ckpt}")
+        print(f"             Best total loss: {gnn_agent.best_total_loss:.6f}")
+    else:
+        print(f"  [GNN-PPO] No checkpoint saved (best_total_loss never improved).")
+
+    print("=" * 70)
+    print("--- Pre-Training Complete ---\n")
