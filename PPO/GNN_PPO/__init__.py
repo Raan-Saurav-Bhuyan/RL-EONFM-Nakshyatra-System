@@ -1,2 +1,3 @@
 from .ppo_agent_gnn import PPOAgentGNN
 from .loc_eval_tracker import LocalizationEvalTracker
+from .pretrain import pretrain_localization_agent

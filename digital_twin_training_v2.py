@@ -6,8 +6,8 @@ from torch.utils.tensorboard import SummaryWriter
 # Import custom modules: --->
 from eon_env.v2.temporal_mdp_wrapper import TemporalEONEnvV2
 from eon_env.v2.localization_mdp_wrapper import ComponentLocalizationEnv
-from PPO.CNN_PPO import PPOAgentCNN, DetectionEvalTracker
-from PPO.GNN_PPO import PPOAgentGNN, LocalizationEvalTracker
+from PPO.CNN_PPO import PPOAgentCNN, DetectionEvalTracker, pretrain_detection_agent
+from PPO.GNN_PPO import PPOAgentGNN, LocalizationEvalTracker, pretrain_localization_agent
 
 # ═══════════════════════════════════════════════════════════════════
 # Kill-switch global variables for agent performance evaluation.
@@ -17,6 +17,14 @@ DET_EVAL_ENABLED = True       # Enable/disable detection performance metrics col
 DET_EVAL_TENSORBOARD = True   # Enable/disable TensorBoard logging of detection eval metrics
 LOC_EVAL_ENABLED = True       # Enable/disable localization performance metrics collection + plotting
 LOC_EVAL_TENSORBOARD = True   # Enable/disable TensorBoard logging of localization eval metrics
+
+# =========================================================================
+# Pre-training global variables for independent Pre-Training
+# for agent model convergence.
+# =========================================================================
+PRETRAIN_DETECTION = True     # Enable/disable independent pre-training of CNN agent
+PRETRAIN_LOCALIZATION = True  # Enable/disable independent pre-training of GNN agent
+PRETRAIN_EPISODES = 1500      # Number of episodes for independent pre-training
 
 if __name__ == '__main__':
     # Create directory for classification visualizations --->
@@ -34,9 +42,52 @@ if __name__ == '__main__':
     state_dim_shape = env.observation_space.shape
     action_dim = env.action_space.n
 
+    # =========================================================================
+    # Phase 1 & 2: Independent Pre-Training
+    # =========================================================================
+    if PRETRAIN_DETECTION:
+        pretrain_detection_agent(
+            env,
+            max_episodes = PRETRAIN_EPISODES,
+            update_timestep = 3,
+            enable_eval = DET_EVAL_ENABLED,
+            enable_tb = DET_EVAL_TENSORBOARD
+        )
+        
+    if PRETRAIN_LOCALIZATION:
+        pretrain_localization_agent(
+            env,
+            max_episodes = PRETRAIN_EPISODES,
+            enable_eval = LOC_EVAL_ENABLED,
+            enable_tb = LOC_EVAL_TENSORBOARD
+        )
+
+    # =========================================================================
+    # Phase 3: Hierarchical Integrated Training (HRL-SFDL)
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("      STARTING HIERARCHICAL INTEGRATED TRAINING (HRL-SFDL)")
+    print("=" * 70)
+
     print(f"Initialized CNN-PPO Agent | State Shape: {state_dim_shape} | Action Dim: {action_dim}")
-    agent = PPOAgentCNN(action_dim = action_dim, save_dir = cnn_save_dir)
-    gnn_agent = PPOAgentGNN(save_dir = gnn_save_dir)
+    
+    # Initialize integrated agents (saving to default checkpoint names): --->
+    agent = PPOAgentCNN(action_dim = action_dim, save_dir = cnn_save_dir, checkpoint_name = "best_cnn_ppo.pt")
+    gnn_agent = PPOAgentGNN(save_dir = gnn_save_dir, checkpoint_name = "best_gnn_ppo.pt")
+
+    # Load pre-trained weights if available, then reset best_total_loss so they
+    # don't get stuck on an artificially low pre-training loss during integrated training: --->
+    pre_cnn_path = os.path.join(cnn_save_dir, "pre_best_cnn_ppo.pt")
+    if os.path.isfile(pre_cnn_path):
+        agent.load_best_model(path=pre_cnn_path)
+        agent.best_total_loss = float('inf')
+        print("  -> Reset CNN best_total_loss to infinity for integrated training.")
+
+    pre_gnn_path = os.path.join(gnn_save_dir, "pre_best_gnn_ppo.pt")
+    if os.path.isfile(pre_gnn_path):
+        gnn_agent.load_best_model(path=pre_gnn_path)
+        gnn_agent.best_total_loss = float('inf')
+        print("  -> Reset GNN best_total_loss to infinity for integrated training.")
 
     # Detection agent performance evaluation tracker: --->
     det_tracker = DetectionEvalTracker() if DET_EVAL_ENABLED else None
@@ -58,12 +109,8 @@ if __name__ == '__main__':
     # to stabilize gradients: --->
     update_timestep = 3
 
-    print("\n--- Starting Pre-Training of CNN PPO Agent ---")
-
     for ep in range(1, max_episodes + 1):
-        print(f"\n--- Episode {ep}/{max_episodes} ---")
-
-        # Resetting simulates 10 full years and returns the (10, 5, 18) temporal stack: --->
+        print(f"\n--- Integrated Training Episode {ep}/{max_episodes} ---")
         state, _ = env.reset()
         print(f"Simulated {env.simulated_years} Years randomly.")
 

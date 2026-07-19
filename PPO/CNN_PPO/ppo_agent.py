@@ -21,7 +21,14 @@ class RolloutBuffer:
 
 class PPOAgentCNN:
     """CNN-backed Proximal Policy Optimization Agent with best-model checkpointing."""
-    def __init__(self, action_dim = 2, lr_actor = 1e-4, lr_critic = 3e-4, gamma=0.99, K_epochs = 10, eps_clip = 0.2, save_dir = "models/CNN_PPO"):
+    def __init__(
+        self,
+        action_dim = 2,
+        lr_actor = 1e-4, lr_critic = 3e-4,
+        gamma=0.99,
+        K_epochs = 10,
+        eps_clip = 0.2,
+        save_dir = "models/CNN_PPO", checkpoint_name = "best_cnn_ppo.pt"):
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
@@ -29,6 +36,7 @@ class PPOAgentCNN:
 
         # Model checkpoint directory and best-loss tracker: --->
         self.save_dir = save_dir
+        self.checkpoint_name = checkpoint_name
         os.makedirs(self.save_dir, exist_ok = True)
         self.best_total_loss = float('inf')
 
@@ -110,7 +118,7 @@ class PPOAgentCNN:
             prev_best = self.best_total_loss
             self.best_total_loss = avg_total_loss
 
-            checkpoint_path = os.path.join(self.save_dir, "best_cnn_ppo.pt")
+            checkpoint_path = os.path.join(self.save_dir, self.checkpoint_name)
             torch.save({
                 'policy_state_dict': self.policy.state_dict(),
                 'optimizer_state_dict': self.optimizer.state_dict(),
@@ -128,7 +136,7 @@ class PPOAgentCNN:
     def load_best_model(self, path=None):
         """Load a previously saved best-model checkpoint."""
         if path is None:
-            path = os.path.join(self.save_dir, "best_cnn_ppo.pt")
+            path = os.path.join(self.save_dir, self.checkpoint_name)
 
         if not os.path.isfile(path):
             print(f"[CNN-PPO] No checkpoint found at {path}")
