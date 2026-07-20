@@ -88,3 +88,37 @@ def pretrain_detection_agent(
         writer.close()
 
     return agent
+
+
+def pretrain_detection_step(agent, env, state, det_tracker, ep):
+    """
+    Executes one CNN detection pre-training step using
+    an already-simulated environment state (from env.reset()).
+
+    Parameters:
+        agent       : PPOAgentCNN instance.
+        env         : TemporalEONEnvV2 instance (already reset).
+        state       : Observation returned by env.reset().
+        det_tracker : DetectionEvalTracker instance or None.
+        ep          : Current episode number (for logging).
+
+    Returns:
+        (action, reward, info) tuple.
+    """
+    action = agent.select_action(state)
+
+    # Execute predictive maintenance decision (terminates immediately): --->
+    next_state, reward, terminated, truncated, info = env.step(action)
+
+    agent.buffer.rewards.append(reward)
+    agent.buffer.is_terminals.append(terminated)
+
+    degradation = info.get('degradation_db', 0.0)
+    n_failed = info.get('n_failed_lightpaths', 0)
+    action_name = "Isolate/Maintain" if action == 1 else "Monitor"
+    print(f"Action Taken: {action_name} | Degradation: {degradation:.2f} dB | Reward: {reward:.2f}")
+
+    if det_tracker is not None:
+        det_tracker.record_episode(ep, action, reward, degradation, n_failed)
+
+    return action, reward, info
