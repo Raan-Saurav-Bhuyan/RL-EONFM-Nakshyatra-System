@@ -20,6 +20,7 @@ def pretrain_detection_agent(
     
     agent = PPOAgentCNN(
         action_dim = action_dim,
+        in_channels = env.observation_space.shape[0],
         save_dir = cnn_save_dir, checkpoint_name = "pre_best_cnn_ppo.pt")
     det_tracker = DetectionEvalTracker() if enable_eval else None
     

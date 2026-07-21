@@ -24,6 +24,7 @@ class PPOAgentCNN:
     def __init__(
         self,
         action_dim = 2,
+        in_channels = 5,
         lr_actor = 1e-4, lr_critic = 3e-4,
         gamma=0.99,
         K_epochs = 10,
@@ -40,20 +41,20 @@ class PPOAgentCNN:
         os.makedirs(self.save_dir, exist_ok = True)
         self.best_total_loss = float('inf')
 
-        self.policy = ActorCriticCNN(action_dim = action_dim)
+        self.policy = ActorCriticCNN(action_dim = action_dim, in_channels = in_channels)
         self.optimizer = optim.Adam([
             {'params': self.policy.backbone.parameters(), 'lr': lr_actor},
             {'params': self.policy.actor.parameters(), 'lr': lr_actor},
             {'params': self.policy.critic.parameters(), 'lr': lr_critic}
         ])
 
-        self.policy_old = ActorCriticCNN(action_dim = action_dim)
+        self.policy_old = ActorCriticCNN(action_dim = action_dim, in_channels = in_channels)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
 
     def select_action(self, state):
-        # State shape from env: (10, 5, 18). Add batch dimension -> (1, 10, 5, 18): --->
+        # State shape from env: (5, 5, 18). Add batch dimension -> (1, 5, 5, 18): --->
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
         with torch.no_grad():
             action, action_logprob = self.policy_old.act(state_tensor)

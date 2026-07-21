@@ -29,7 +29,7 @@ PRETRAIN_EPISODES = 1500      # Number of episodes for independent pre-training
 
 def pretrain_agents_unified(
     env,
-    max_episodes = 1500,
+    max_episodes = 500,
     pretrain_detection = True,
     pretrain_localization = True,
     det_update_timestep = 3,
@@ -59,6 +59,7 @@ def pretrain_agents_unified(
 
         det_agent = PPOAgentCNN(
             action_dim = action_dim,
+            in_channels = env.observation_space.shape[0],
             save_dir = cnn_save_dir, checkpoint_name = "pre_best_cnn_ppo.pt")
         det_tracker = DetectionEvalTracker() if enable_det_eval else None
 
@@ -217,7 +218,10 @@ if __name__ == '__main__':
     print(f"Initialized CNN-PPO Agent | State Shape: {state_dim_shape} | Action Dim: {action_dim}")
     
     # Initialize integrated agents (saving to default checkpoint names): --->
-    agent = PPOAgentCNN(action_dim = action_dim, save_dir = cnn_save_dir, checkpoint_name = "best_cnn_ppo.pt")
+    agent = PPOAgentCNN(
+        action_dim = action_dim,
+        in_channels = env.observation_space.shape[0],
+        save_dir = cnn_save_dir, checkpoint_name = "best_cnn_ppo.pt")
     gnn_agent = PPOAgentGNN(save_dir = gnn_save_dir, checkpoint_name = "best_gnn_ppo.pt")
 
     # Load pre-trained weights if available, then reset best_total_loss so they

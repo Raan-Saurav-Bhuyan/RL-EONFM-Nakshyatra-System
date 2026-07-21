@@ -23,7 +23,7 @@ class TemporalEONEnvV2(gym.Env):
         self.network_json_path = network_json_path
 
         # State Space dimensions: --->
-        self.years_window = 10
+        self.years_window = 5
         self.k_clusters = k_clusters
         self.num_metrics = 6
         self.features_per_cluster = self.num_metrics * 3 # 3 fixed conv filters
@@ -32,7 +32,7 @@ class TemporalEONEnvV2(gym.Env):
         self.lsh_manager = LSHClusterManager(input_dim=self.num_metrics, num_functions_k=6)
         self.aggregator = FixedConvAggregator(num_metrics=self.num_metrics)
 
-        # State Space: A 3D tensor -> (10, 5, 18): --->
+        # State Space: A 3D tensor -> (5, 5, 18): --->
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf,
             shape=(self.years_window, self.k_clusters, self.features_per_cluster),
@@ -122,10 +122,8 @@ class TemporalEONEnvV2(gym.Env):
         telemetry = self._get_active_telemetry()
         self.initial_gsnr = np.mean(telemetry[:, 0]) if telemetry.shape[0] > 0 else 0.0
 
-        # Randomize episode length between 10 and 20 years to teach the agent patience: --->
-        self.simulated_years = np.random.randint(10, 21)
-        # Fix episode length to 10 years: --->
-        # self.simulated_years = 10
+        # Fix episode length to 5 years: --->
+        self.simulated_years = 5
 
         # Simulate randomly chosen years, snapshotting state every 365 days: --->
         for year in range(self.simulated_years):
@@ -142,8 +140,8 @@ class TemporalEONEnvV2(gym.Env):
         # Hard failure threshold generally considered around Pre-FEC BER 1e-2 for generic models: --->
         self.final_failed_lightpaths = np.sum(telemetry[:, 5] > 0.01)
 
-        # Take the last 10 years of the temporal sequence to maintain static CNN input dimensions: --->
-        state_tensor = np.stack(temporal_window[-10:])
+        # Take the last 5 years of the temporal sequence to maintain static CNN input dimensions: --->
+        state_tensor = np.stack(temporal_window[-self.years_window:])
 
         self.current_state = state_tensor # Shape: (10, 5, 18)
 
