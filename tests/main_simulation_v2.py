@@ -2,6 +2,7 @@ import sys
 import os
 import random
 import time
+import warnings
 import numpy as np
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
@@ -11,20 +12,61 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from eon_env.v2.environment import EONEnvV2
 from eon_env.v2 import constants as const
+
+# Import all clustering managers: --->
 from clustering.LSH import LSHClusterManager
+from clustering.similarity_learning import SimilarityClusterManager
+from clustering.contrastive_learning import ContrastiveClusterManager
+
 try:
-    from tests.visualize_clusters import visualize_clusters_pca
+    from tests.visualize_clusters_v2 import visualize_clusters_pca
 except ImportError:
-    from visualize_clusters import visualize_clusters_pca
+    try:
+        from tests.visualize_clusters import visualize_clusters_pca
+    except ImportError:
+        from visualize_clusters import visualize_clusters_pca
+
 from cluster_aggregations import FixedConvAggregator
+
+# Suppress Warnings for Cleaner Output: --->
+warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empty slice")
+warnings.filterwarnings("ignore", category=UserWarning, message="KMeans is known to have a memory leak on Windows with MKL")
+
+
+def get_user_choice() -> str:
+    """
+    Prompts the user to select a clustering engine and validates the input.
+
+    Returns:
+        str: The chosen engine name ('lsh', 'similarity', or 'contrastive').
+    """
+    while True:
+        print("\n--- Please Select a Clustering Engine for V2 Digital Twin ---")
+        print("1: Locality Sensitive Hashing (LSH)")
+        print("2: Unsupervised Similarity Learning (Autoencoder)")
+        print("3: Self-Supervised Contrastive Learning (SSL)")
+
+        choice = input("Enter your choice (1, 2, or 3): ")
+
+        if choice == '1':
+            return 'lsh'
+        elif choice == '2':
+            return 'similarity'
+        elif choice == '3':
+            return 'contrastive'
+        else:
+            print("Invalid choice. Please enter 1, 2, or 3.")
+
 
 def run_v2_simulation_and_clustering(
     json_path = "nsfnet.json",
     target_services = const.NUM_LIGHTPATHS,
-    sim_days = 730):
+    sim_days = 730,
+    engine_name: str = None
+):
     """
     Provisions services using Flex-Grid & SDM constraints, advances temporal degradation,
-    collects telemetry, and clusters OPM metrics via LSH.
+    collects telemetry, and clusters OPM metrics via the selected clustering engine.
     """
     print("--- Initializing V2 EON Digital Twin Simulator ---")
     if not os.path.exists(json_path):
@@ -70,13 +112,34 @@ def run_v2_simulation_and_clustering(
         print("No active services telemetry available to cluster.")
         return
 
-    print("--- Performing LSH Clustering on Degraded Telemetry ---")
+    # User Selection of Clustering Engine if not explicitly passed: --->
+    if engine_name is None:
+        engine_name = get_user_choice()
+
     input_dim = observation.shape[1]
+    manager = None
+    N_CLUSTERS = 10
+
+    print(f"\n--- Initializing {engine_name.upper()} Clustering Engine on Degraded Telemetry ---")
     start_time = time.time()
 
-    # Using the LSH backend to find Patient-0 anomalies dynamically
-    lsh_manager = LSHClusterManager(input_dim=input_dim, num_functions_k=min(8, input_dim))
-    clusters = lsh_manager.fit_predict(observation)
+    if engine_name == 'lsh':
+        manager = LSHClusterManager(
+            input_dim = input_dim, num_functions_k = min(8, input_dim)
+        )
+    elif engine_name == 'similarity':
+        manager = SimilarityClusterManager(
+            input_dim = input_dim, n_clusters = N_CLUSTERS, latent_dim = 10,
+            pretrain_epochs = 50, train_epochs = 100, verbose = False
+        )
+    elif engine_name == 'contrastive':
+        manager = ContrastiveClusterManager(
+            input_dim = input_dim, n_clusters = N_CLUSTERS, representation_dim = 16,
+            projection_dim = 8, epochs = 200, temperature = 0.1, verbose = False
+        )
+
+    print("Performing clustering... (this may take a moment for deep learning models)")
+    clusters = manager.fit_predict(observation)
     end_time = time.time()
 
     print(f"Clustering complete in {end_time - start_time:.2f} seconds.")
@@ -106,10 +169,11 @@ def run_v2_simulation_and_clustering(
     final_state_representation = np.array(aggregated_cluster_features)
     print(f"Final state representation for RL agent has shape: {final_state_representation.shape}\n")
 
-    # Pass to the existing PCA visualizer
-    visualize_clusters_pca(observation, clusters, "v2_lsh")
+    # Pass to the PCA visualizer: --->
+    visualize_clusters_pca(observation, clusters, f"v2_{engine_name}")
 
     writer.close()
+    env.close()
 
 if __name__ == '__main__':
     run_v2_simulation_and_clustering()
