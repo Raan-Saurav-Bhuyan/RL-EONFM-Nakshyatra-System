@@ -213,7 +213,7 @@ __marimo__/
 visualizations/
 visualizations/clusters/*
 runs/
-demo_performances/*
+performance_plots/*
 *tex
 models/CNN_PPO/*.pt
 models/GNN_PPO/*.pt
