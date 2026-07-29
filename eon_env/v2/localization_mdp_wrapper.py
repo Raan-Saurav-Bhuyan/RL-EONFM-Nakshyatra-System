@@ -6,8 +6,13 @@ import torch
 
 class ComponentLocalizationEnv(gym.Env):
     """
-    Micro-MDP for the lower-level GNN-DQN agent to explicitly localize
-    soft failures at the ROADM or EDFA span level.
+    Single-step classification MDP for the GNN-based PPO localization agent.
+
+    The agent classifies ALL components in the augmented network graph
+    simultaneously in a single forward pass, producing a binary label
+    (healthy=0, faulty=1) for every node.
+
+    The episode is exactly 1 step: classify all nodes → receive reward → done.
     """
     def __init__(self, simulator_v2):
         super().__init__()
@@ -23,19 +28,22 @@ class ComponentLocalizationEnv(gym.Env):
 
         self.num_components = len(self.component_mapping)
 
-        # Action Space: Select any component to inspect: --->
-        self.action_space = spaces.Discrete(self.num_components)
+        # Action Space: Binary vector — classify each component as healthy (0) or faulty (1): --->
+        self.action_space = spaces.MultiBinary(self.num_components)
 
         # Observation Space: Node features for the GNN: --->
-        # (Features: [Mean_GSNR, Mean_BER, Lightpath_Count, Checked_Flag])
+        # (Features: [Mean_GSNR, Mean_BER, Lightpath_Count, Node_Degree])
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf,
             shape=(self.num_components, 4), dtype=np.float32
         )
 
-        self.max_search_steps = 25
-        self.current_step = 0
-        self.checked_components = set()
+        # Reward function coefficients (asymmetric weighting): --->
+        self.r_tp = 10.0    # Reward for correctly identifying a faulty component
+        self.r_tn = 0.5     # Small reward for correctly classifying a healthy component
+        self.r_fp = 3.0     # Penalty for false alarm on a healthy component
+        self.r_fn = 15.0    # Heavier penalty for missing a faulty component (safety-critical)
+        self.lambda_f1 = 20.0  # Bonus scaled by episode F1-score
 
     def _build_augmented_graph(self):
         """Expands logical links into sequential EDFA spans."""
@@ -68,6 +76,31 @@ class ComponentLocalizationEnv(gym.Env):
 
         self.adjacency_matrix = nx.to_numpy_array(self.aug_graph)
 
+        # Pre-compute node degrees for the 4th feature: --->
+        self._node_degrees = np.array(
+            [self.aug_graph.degree(i) for i in range(len(self.component_mapping))],
+            dtype=np.float32
+        )
+
+    def _get_ground_truth_labels(self):
+        """
+        Returns a binary vector [num_components] where 1 = faulty, 0 = healthy,
+        and a severity vector [num_components] for reward scaling.
+        Derived from simulator.faulty_components ground truth.
+        """
+        labels = np.zeros(self.num_components, dtype=np.float32)
+        severities = np.zeros(self.num_components, dtype=np.float32)
+
+        for f_type, f_u, f_v, f_span, f_sev in self.simulator.faulty_components:
+            for comp_idx, comp_info in enumerate(self.component_mapping):
+                c_type, c_u, c_v, c_span = comp_info
+
+                if f_type == c_type and ((f_u == c_u and f_v == c_v) or (f_u == c_v and f_v == c_u)):
+                    labels[comp_idx] = 1.0
+                    severities[comp_idx] = max(severities[comp_idx], f_sev)
+
+        return labels, severities
+
     def _get_node_features(self):
         """Maps lightpath telemetry to the components they traverse."""
         features = np.zeros((self.num_components, 4), dtype=np.float32)
@@ -98,51 +131,72 @@ class ComponentLocalizationEnv(gym.Env):
         features[mask, 0] /= features[mask, 2]
         features[mask, 1] /= features[mask, 2]
 
-        # Apply checked flags: --->
-        for idx in self.checked_components:
-            features[idx, 3] = 1.0
+        # 4th feature: Node degree (structural connectivity): --->
+        features[:, 3] = self._node_degrees
 
         return features
 
     def reset(self, **kwargs):
-        self.current_step = 0
-        self.checked_components.clear()
         return self._get_node_features(), {'adjacency': self.adjacency_matrix}
 
     def step(self, action):
-        self.current_step += 1
-        self.checked_components.add(action)
+        """
+        Single-step full-graph classification.
 
-        comp_type, u, v, span_idx = self.component_mapping[action]
+        Parameters
+        ----------
+        action : np.ndarray or torch.Tensor of shape [num_components]
+            Binary vector where 1 = predicted faulty, 0 = predicted healthy.
 
-        # Validate explicitly against the simulator's ground truth tracked failures: --->
-        actual_degradation = 0.0
-        is_faulty = False
+        Returns
+        -------
+        obs, reward, terminated, truncated, info
+        """
+        # Convert action to numpy if tensor: --->
+        if isinstance(action, torch.Tensor):
+            action = action.cpu().numpy()
+        action = action.astype(np.float32)
 
-        for f_type, f_u, f_v, f_span, f_sev in self.simulator.faulty_components:
-            if f_type == comp_type and ((f_u == u and f_v == v) or (f_u == v and f_v == u)):
-                is_faulty = True
-                actual_degradation = f_sev
+        # Get ground truth: --->
+        ground_truth, severities = self._get_ground_truth_labels()
 
-                break
+        # Compute per-component confusion matrix: --->
+        tp_mask = (action == 1) & (ground_truth == 1)
+        fp_mask = (action == 1) & (ground_truth == 0)
+        tn_mask = (action == 0) & (ground_truth == 0)
+        fn_mask = (action == 0) & (ground_truth == 1)
 
-        # Dynamic continuous rewards for the localization agent: --->
-        if is_faulty:
-            # Correct localization: Reward proportional to severity of identified fault --->
-            reward = 50.0 + (actual_degradation * 10.0)
-            terminated = True
-        else:
-            # Misclassification penalty. Scales with how bad the network currently is: --->
-            network_severity = sum([f_sev for _, _, _, _, f_sev in self.simulator.faulty_components])
-            reward = -2.0 - (network_severity * 2.0)
-            terminated = False
+        tp = int(tp_mask.sum())
+        fp = int(fp_mask.sum())
+        tn = int(tn_mask.sum())
+        fn = int(fn_mask.sum())
 
-        # Limit search to prevent infinite loops: --->
-        truncated = self.current_step >= self.max_search_steps
+        # ── Continuous composite reward: ──
 
-        # Penalty for exhausting budget: --->
-        if truncated and not terminated:
-            reward = -10.0
+        # Per-node rewards summed across all nodes: --->
+        tp_reward = self.r_tp * (severities[tp_mask].sum() if tp > 0 else 0.0)
+        tn_reward = self.r_tn * tn
+        fp_penalty = self.r_fp * fp
+        fn_penalty = self.r_fn * (severities[fn_mask].sum() if fn > 0 else 0.0)
 
-        info = {'is_faulty': is_faulty, 'true_faults_count': len(self.simulator.faulty_components)}
+        # F1-score bonus: --->
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        f1_bonus = self.lambda_f1 * f1
+
+        reward = tp_reward + tn_reward - fp_penalty - fn_penalty + f1_bonus
+
+        # Episode always terminates immediately (single-step classification): --->
+        terminated = True
+        truncated = False
+
+        info = {
+            'tp': tp, 'fp': fp, 'tn': tn, 'fn': fn,
+            'precision': precision, 'recall': recall, 'f1': f1,
+            'true_faults_count': int(ground_truth.sum()),
+            'predictions': action.copy(),
+            'ground_truth': ground_truth.copy(),
+        }
+
         return self._get_node_features(), reward, terminated, truncated, info

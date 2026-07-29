@@ -19,6 +19,10 @@ class GraphConvLayer(nn.Module):
 class ActorCriticGNN(nn.Module):
     """
     Actor-Critic Network utilizing GNN to process spatial topology.
+
+    The actor head performs per-node binary classification (healthy vs faulty)
+    for every component in the augmented network graph simultaneously.
+    The critic head outputs a scalar state value via mean-pooled node embeddings.
     """
     def __init__(self, num_features = 4, hidden_dim = 64):
         super().__init__()
@@ -26,11 +30,11 @@ class ActorCriticGNN(nn.Module):
         self.gcn1 = GraphConvLayer(num_features, hidden_dim)
         self.gcn2 = GraphConvLayer(hidden_dim, hidden_dim)
 
-        # Actor: Outputs logits for selecting a component: --->
+        # Actor: Per-node binary classification logits [healthy=0, faulty=1]: --->
         self.actor = nn.Sequential(
             nn.Linear(hidden_dim, 32),
             nn.ReLU(),
-            nn.Linear(32, 1)
+            nn.Linear(32, 2)
         )
 
         # Critic: Outputs value of the global network state: --->
@@ -49,8 +53,8 @@ class ActorCriticGNN(nn.Module):
         h = F.relu(self.gcn1(x, adj_hat))
         h = F.relu(self.gcn2(h, adj_hat))
 
-        # Actor Logits: (Batch, Num_Nodes): --->
-        action_logits = self.actor(h).squeeze(-1)
+        # Actor Logits: (Batch, Num_Nodes, 2) — per-node binary classification: --->
+        action_logits = self.actor(h)
 
         # Critic Global Value (Mean Pooling): (Batch, 1): --->
         global_h = torch.mean(h, dim=1)
@@ -59,21 +63,97 @@ class ActorCriticGNN(nn.Module):
         return action_logits, state_value
 
     def act(self, x, adj):
+        """
+        Sample per-node binary classifications for all nodes simultaneously.
+
+        Returns:
+            actions:     (Batch, Num_Nodes) — 0 (healthy) or 1 (faulty) per node
+            logprobs:    (Batch,) — summed log-probability across all node classifications
+        """
         action_logits, _ = self.forward(x, adj)
+        # action_logits: (Batch, Num_Nodes, 2): --->
+
+        # Independent Categorical(2) per node: --->
         action_probs = F.softmax(action_logits, dim = -1)
-        dist = Categorical(action_probs)
+        # action_probs: (Batch, Num_Nodes, 2): --->
 
-        action = dist.sample()
-        action_logprob = dist.log_prob(action)
+        # Reshape for batched Categorical sampling: --->
+        batch_size, num_nodes, _ = action_probs.shape
+        flat_probs = action_probs.view(-1, 2)
+        dist = Categorical(flat_probs)
 
-        return action.detach(), action_logprob.detach()
+        flat_actions = dist.sample()
+        flat_logprobs = dist.log_prob(flat_actions)
 
-    def evaluate(self, x, adj, action):
+        # Reshape back to (Batch, Num_Nodes): --->
+        actions = flat_actions.view(batch_size, num_nodes)
+        per_node_logprobs = flat_logprobs.view(batch_size, num_nodes)
+
+        # Sum log-probs across nodes (joint log-probability): --->
+        total_logprobs = per_node_logprobs.sum(dim = -1)
+
+        return actions.detach(), total_logprobs.detach()
+
+    def evaluate(self, x, adj, actions):
+        """
+        Evaluate log-probabilities and entropy for given per-node classification actions.
+
+        Parameters:
+            x:       (Batch, Num_Nodes, Num_Features)
+            adj:     (Batch, Num_Nodes, Num_Nodes)
+            actions: (Batch, Num_Nodes) — 0/1 per node
+
+        Returns:
+            logprobs:     (Batch,) — summed log-probability across all node classifications
+            state_values: (Batch,) — critic state values
+            entropy:      (Batch,) — mean entropy across all node classifications
+        """
         action_logits, state_values = self.forward(x, adj)
+        # action_logits: (Batch, Num_Nodes, 2): --->
+
         action_probs = F.softmax(action_logits, dim = -1)
-        dist = Categorical(action_probs)
 
-        action_logprobs = dist.log_prob(action)
-        dist_entropy = dist.entropy()
+        batch_size, num_nodes, _ = action_probs.shape
+        flat_probs = action_probs.view(-1, 2)
+        flat_actions = actions.view(-1)
 
-        return action_logprobs, state_values.squeeze(-1), dist_entropy
+        dist = Categorical(flat_probs)
+        flat_logprobs = dist.log_prob(flat_actions)
+        flat_entropy = dist.entropy()
+
+        # Reshape and aggregate: --->
+        per_node_logprobs = flat_logprobs.view(batch_size, num_nodes)
+        per_node_entropy = flat_entropy.view(batch_size, num_nodes)
+
+        # Sum log-probs, mean entropy across nodes: --->
+        total_logprobs = per_node_logprobs.sum(dim = -1)
+        mean_entropy = per_node_entropy.mean(dim = -1)
+
+        return total_logprobs, state_values.squeeze(-1), mean_entropy
+
+    def classify(self, x, adj):
+        """
+        Deterministic per-node classification for inference/evaluation.
+
+        Returns:
+            labels: (Batch, Num_Nodes) — 0 (healthy) or 1 (faulty)
+            probs:  (Batch, Num_Nodes, 2) — softmax probabilities
+        """
+        with torch.no_grad():
+            action_logits, _ = self.forward(x, adj)
+            probs = F.softmax(action_logits, dim = -1)
+            labels = probs.argmax(dim = -1)
+
+        return labels, probs
+
+    def get_classification_probs(self, x, adj):
+        """
+        Get per-node classification probabilities (differentiable, for auxiliary BCE loss).
+
+        Returns:
+            probs: (Batch, Num_Nodes, 2) — softmax probabilities [p_healthy, p_faulty]
+        """
+        action_logits, _ = self.forward(x, adj)
+        probs = F.softmax(action_logits, dim = -1)
+
+        return probs

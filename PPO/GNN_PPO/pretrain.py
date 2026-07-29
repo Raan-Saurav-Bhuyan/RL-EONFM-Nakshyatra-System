@@ -33,30 +33,27 @@ def pretrain_localization_agent(env, max_episodes = 1500, enable_eval = True, en
         loc_state, loc_info = loc_env.reset()
         adj = loc_info['adjacency']
 
-        gnn_reward_sum = 0
-        loc_done = False
+        # Single-step full-graph classification: --->
+        action = gnn_agent.select_action(loc_state, adj)
+        next_loc_state, loc_reward, loc_term, loc_trunc, l_info = loc_env.step(action)
 
-        while not loc_done:
-            loc_action = gnn_agent.select_action(loc_state, adj)
-            next_loc_state, loc_reward, loc_term, loc_trunc, l_info = loc_env.step(loc_action)
+        gnn_agent.buffer.rewards.append(loc_reward)
+        gnn_agent.buffer.is_terminals.append(True)
 
-            gnn_agent.buffer.rewards.append(loc_reward)
-            gnn_agent.buffer.is_terminals.append(loc_term or loc_trunc)
+        # Store ground truth for auxiliary BCE loss: --->
+        gnn_agent.store_ground_truth(l_info['ground_truth'])
 
-            if loc_tracker is not None:
-                loc_tracker.record_step(l_info['is_faulty'])
-
-            loc_state = next_loc_state
-            gnn_reward_sum += loc_reward
-            loc_done = loc_term or loc_trunc
-
+        # Record classification metrics: --->
         if loc_tracker is not None:
-            loc_tracker.finalize_episode(gnn_reward_sum, loc_env.num_components, l_info['true_faults_count'])
+            loc_tracker.record_episode_classifications(
+                l_info['tp'], l_info['fp'], l_info['tn'], l_info['fn'])
+            loc_tracker.finalize_episode(loc_reward, l_info['f1'])
+
             if writer is not None:
                 loc_tracker.log_to_tensorboard(writer, ep)
                 
         if writer is not None:
-            writer.add_scalar('PreTrain_GNN_Agent/Reward', gnn_reward_sum, ep)
+            writer.add_scalar('PreTrain_GNN_Agent/Reward', loc_reward, ep)
 
         # Update GNN Actor-Critic Networks: --->
         if len(gnn_agent.buffer.states) > 0:
@@ -71,7 +68,7 @@ def pretrain_localization_agent(env, max_episodes = 1500, enable_eval = True, en
                 writer.add_scalar('PreTrain_GNN_Loss/Total', g_t_loss, ep)
 
         # if ep % 50 == 0 or ep == max_episodes:
-        print(f"--- GNN Pre-Training Episode {ep}/{max_episodes} | Total Reward: {gnn_reward_sum:.2f} ---")
+        print(f"--- GNN Pre-Training Episode {ep}/{max_episodes} | Reward: {loc_reward:.2f} | F1: {l_info['f1']:.3f} | Faults: {l_info['true_faults_count']} ---")
 
     print("\n" + "=" * 70)
     print("      GNN LOCALIZATION AGENT PRE-TRAINING COMPLETE")
@@ -97,31 +94,27 @@ def pretrain_localization_step(gnn_agent, env, loc_tracker, ep):
         ep          : Current episode number (for logging).
 
     Returns:
-        gnn_reward_sum (float): Total reward accumulated during localization.
+        loc_reward (float): Total reward from the single-step classification.
     """
     # Initialize localization environment based on the simulated state: --->
     loc_env = ComponentLocalizationEnv(env.simulator)
     loc_state, loc_info = loc_env.reset()
     adj = loc_info['adjacency']
 
-    gnn_reward_sum = 0
-    loc_done = False
+    # Single-step full-graph classification: --->
+    action = gnn_agent.select_action(loc_state, adj)
+    next_loc_state, loc_reward, loc_term, loc_trunc, l_info = loc_env.step(action)
 
-    while not loc_done:
-        loc_action = gnn_agent.select_action(loc_state, adj)
-        next_loc_state, loc_reward, loc_term, loc_trunc, l_info = loc_env.step(loc_action)
+    gnn_agent.buffer.rewards.append(loc_reward)
+    gnn_agent.buffer.is_terminals.append(True)
 
-        gnn_agent.buffer.rewards.append(loc_reward)
-        gnn_agent.buffer.is_terminals.append(loc_term or loc_trunc)
+    # Store ground truth for auxiliary BCE loss: --->
+    gnn_agent.store_ground_truth(l_info['ground_truth'])
 
-        if loc_tracker is not None:
-            loc_tracker.record_step(l_info['is_faulty'])
-
-        loc_state = next_loc_state
-        gnn_reward_sum += loc_reward
-        loc_done = loc_term or loc_trunc
-
+    # Record classification metrics: --->
     if loc_tracker is not None:
-        loc_tracker.finalize_episode(gnn_reward_sum, loc_env.num_components, l_info['true_faults_count'])
+        loc_tracker.record_episode_classifications(
+            l_info['tp'], l_info['fp'], l_info['tn'], l_info['fn'])
+        loc_tracker.finalize_episode(loc_reward, l_info['f1'])
 
-    return gnn_reward_sum
+    return loc_reward

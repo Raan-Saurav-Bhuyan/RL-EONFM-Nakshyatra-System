@@ -1,7 +1,7 @@
 """
 Localization Agent Training Performance Evaluation Tracker.
 
-Collects per-inspection-step and per-episode metrics during training of
+Collects per-episode full-graph classification metrics during training of
 the GNN-based PPO localization agent, then generates publication-quality
 matplotlib figures for:
     1. Classification metrics bar chart (Precision, Recall, F1, Accuracy)
@@ -68,22 +68,17 @@ def _add_legend(ax, **kwargs):
 
 class LocalizationEvalTracker:
     """
-    Collects training-time inspection outcomes, per-episode rewards, and
-    PPO losses for the GNN-based localization agent, then produces
-    publication-quality matplotlib figures.
+    Collects training-time full-graph classification outcomes, per-episode
+    rewards, and PPO losses for the GNN-based localization agent, then
+    produces publication-quality matplotlib figures.
 
-    Ground-truth labelling follows the LaTeX specification (Eq. 7):
-        y_loc^(kappa) = 1  if the inspected component is faulty
-        y_loc^(kappa) = 0  otherwise
-        y_hat_loc^(kappa) = 1  (selecting a component = positive prediction)
-
-    Classification outcomes per inspection step:
-        TP  — inspected component is faulty     (is_faulty = True)
-        FP  — inspected component is healthy    (is_faulty = False)
-
-    TN and FN are computed at the end of each localization episode:
-        TN  — healthy components NOT selected for inspection
-        FN  — faulty components NOT identified before budget exhaustion
+    In the single-pass full-graph classification architecture, the agent
+    classifies every component in the augmented graph simultaneously.
+    The confusion matrix is computed directly from predictions vs ground truth:
+        TP — node classified as faulty AND actually faulty
+        FP — node classified as faulty BUT actually healthy
+        TN — node classified as healthy AND actually healthy
+        FN — node classified as healthy BUT actually faulty
     """
 
     def __init__(self):
@@ -93,15 +88,10 @@ class LocalizationEvalTracker:
         self.total_tn = 0
         self.total_fn = 0
 
-        # ── Per-episode accumulators (reset each finalize_episode): ──
-        self._episode_tp = 0
-        self._episode_fp = 0
-        self._episode_steps = 0
-
         # ── Per-episode history lists: ──
         self.episode_indices = []       # Localization episode index (1-based)
         self.episode_rewards = []       # Cumulative reward R_loc^total per episode
-        self.episode_steps = []         # Inspection steps kappa per episode
+        self.episode_f1_scores = []     # F1-score per episode
 
         # ── PPO update loss history: ──
         self.loss_steps = []
@@ -112,72 +102,43 @@ class LocalizationEvalTracker:
         # ── Internal episode counter: ──
         self._episode_count = 0
 
-    def record_step(self, is_faulty):
+    def record_episode_classifications(self, tp, fp, tn, fn):
         """
-        Record a single inspection step within the current localization episode.
-
-        Since the act of selecting a component for inspection constitutes a
-        positive prediction (y_hat = 1), each step is classified as either
-        TP (is_faulty = True) or FP (is_faulty = False).
+        Record the full confusion matrix from a single classification episode.
 
         Parameters
         ----------
-        is_faulty : bool
-            Whether the inspected component is actually faulty (from
-            env info['is_faulty']).
+        tp : int
+            True positives (faulty components correctly classified as faulty).
+        fp : int
+            False positives (healthy components incorrectly classified as faulty).
+        tn : int
+            True negatives (healthy components correctly classified as healthy).
+        fn : int
+            False negatives (faulty components incorrectly classified as healthy).
         """
-        self._episode_steps += 1
+        self.total_tp += tp
+        self.total_fp += fp
+        self.total_tn += tn
+        self.total_fn += fn
 
-        if is_faulty:
-            self._episode_tp += 1
-        else:
-            self._episode_fp += 1
-
-    def finalize_episode(self, episode_reward, num_components, true_faults_count):
+    def finalize_episode(self, episode_reward, episode_f1 = 0.0):
         """
         Finalize metrics for the completed localization episode.
-
-        Computes TN and FN from the episode's inspection history, records
-        cumulative reward and step count, and resets per-episode accumulators.
 
         Parameters
         ----------
         episode_reward : float
-            Total cumulative reward R_loc^total for this localization episode.
-        num_components : int
-            Total number of components |V_aug| in the augmented graph.
-        true_faults_count : int
-            Number of faulty components in the network for this episode
-            (from env info['true_faults_count']).
+            Total reward for this localization episode.
+        episode_f1 : float
+            F1-score for this specific episode.
         """
         self._episode_count += 1
-
-        # ── Compute TN and FN for the completed episode: ──
-        # FN = faulty components NOT identified by the agent:
-        episode_fn = max(0, true_faults_count - self._episode_tp)
-
-        # TN = healthy components NOT selected for inspection:
-        # Total healthy components = num_components - true_faults_count
-        # Healthy components inspected = FP
-        # Healthy components not inspected = total healthy - FP
-        total_healthy = num_components - true_faults_count
-        episode_tn = max(0, total_healthy - self._episode_fp)
-
-        # ── Accumulate into global counts: ──
-        self.total_tp += self._episode_tp
-        self.total_fp += self._episode_fp
-        self.total_tn += episode_tn
-        self.total_fn += episode_fn
 
         # ── Record episode-level data: ──
         self.episode_indices.append(self._episode_count)
         self.episode_rewards.append(episode_reward)
-        self.episode_steps.append(self._episode_steps)
-
-        # ── Reset per-episode accumulators: ──
-        self._episode_tp = 0
-        self._episode_fp = 0
-        self._episode_steps = 0
+        self.episode_f1_scores.append(episode_f1)
 
     def record_losses(self, update_step, actor_loss, critic_loss, total_loss):
         """
@@ -248,8 +209,8 @@ class LocalizationEvalTracker:
         if self.episode_rewards:
             writer.add_scalar("LocEval/Episode_Reward", self.episode_rewards[-1], episode)
 
-        if self.episode_steps:
-            writer.add_scalar("LocEval/Episode_Steps", self.episode_steps[-1], episode)
+        if self.episode_f1_scores:
+            writer.add_scalar("LocEval/Episode_F1", self.episode_f1_scores[-1], episode)
 
     def generate_plots(self, save_dir = "visualizations/classification_plots"):
         """

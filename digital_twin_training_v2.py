@@ -24,7 +24,7 @@ LOC_EVAL_TENSORBOARD = True   # Enable/disable TensorBoard logging of localizati
 # =========================================================================
 PRETRAIN_DETECTION = True     # Enable/disable independent pre-training of CNN agent
 PRETRAIN_LOCALIZATION = True  # Enable/disable independent pre-training of GNN agent
-PRETRAIN_EPISODES = 1500      # Number of episodes for independent pre-training
+PRETRAIN_EPISODES = 10      # Number of episodes for independent pre-training
 
 
 def pretrain_agents_unified(
@@ -132,16 +132,16 @@ def pretrain_agents_unified(
                     det_writer.add_scalar('PreTrain_CNN_Loss/Critic', c_loss, det_time_step)
                     det_writer.add_scalar('PreTrain_CNN_Loss/Total', t_loss, det_time_step)
 
-        # GNN Localization Step: --->
+        # GNN Localization Step (single-step full-graph classification): --->
         if loc_agent is not None:
-            gnn_reward_sum = pretrain_localization_step(
+            loc_reward = pretrain_localization_step(
                 loc_agent, env, loc_tracker, ep)
 
             if loc_tracker is not None and loc_writer is not None:
                 loc_tracker.log_to_tensorboard(loc_writer, ep)
 
             if loc_writer is not None:
-                loc_writer.add_scalar('PreTrain_GNN_Agent/Reward', gnn_reward_sum, ep)
+                loc_writer.add_scalar('PreTrain_GNN_Agent/Reward', loc_reward, ep)
 
             # Update GNN Actor-Critic Networks: --->
             if len(loc_agent.buffer.states) > 0:
@@ -156,7 +156,7 @@ def pretrain_agents_unified(
                     loc_writer.add_scalar('PreTrain_GNN_Loss/Total', g_t_loss, ep)
 
             # if ep % 50 == 0 or ep == max_episodes:
-            print(f"--- GNN Pre-Training Episode {ep}/{max_episodes} | Total Reward: {gnn_reward_sum:.2f} ---")
+            print(f"--- GNN Pre-Training Episode {ep}/{max_episodes} | Reward: {loc_reward:.2f} ---")
 
     # Post Pre-Training Cleanup: --->
     print("\n" + "=" * 70)
@@ -299,34 +299,28 @@ if __name__ == '__main__':
             loc_state, loc_info = loc_env.reset()
             adj = loc_info['adjacency']
 
-            gnn_reward_sum = 0
-            loc_done = False
+            # Single-step full-graph classification: --->
+            loc_action = gnn_agent.select_action(loc_state, adj)
+            next_loc_state, loc_reward, loc_term, loc_trunc, l_info = loc_env.step(loc_action)
 
-            while not loc_done:
-                loc_action = gnn_agent.select_action(loc_state, adj)
-                next_loc_state, loc_reward, loc_term, loc_trunc, l_info = loc_env.step(loc_action)
+            gnn_agent.buffer.rewards.append(loc_reward)
+            gnn_agent.buffer.is_terminals.append(True)
 
-                gnn_agent.buffer.rewards.append(loc_reward)
-                gnn_agent.buffer.is_terminals.append(loc_term or loc_trunc)
+            # Store ground truth for auxiliary BCE loss: --->
+            gnn_agent.store_ground_truth(l_info['ground_truth'])
 
-                # Record inspection step for localization eval tracker: --->
-                if loc_tracker is not None:
-                    loc_tracker.record_step(l_info['is_faulty'])
-
-                loc_state = next_loc_state
-                gnn_reward_sum += loc_reward
-                loc_done = loc_term or loc_trunc
-
-            # Finalize localization episode metrics: --->
+            # Record classification metrics for localization eval tracker: --->
             if loc_tracker is not None:
-                loc_tracker.finalize_episode(gnn_reward_sum, loc_env.num_components, l_info['true_faults_count'])
+                loc_tracker.record_episode_classifications(
+                    l_info['tp'], l_info['fp'], l_info['tn'], l_info['fn'])
+                loc_tracker.finalize_episode(loc_reward, l_info['f1'])
 
             # Log localization eval metrics to TensorBoard: --->
             if loc_tracker is not None and LOC_EVAL_TENSORBOARD:
                 loc_tracker.log_to_tensorboard(writer, ep)
 
-            writer.add_scalar('GNN_Agent/Reward', gnn_reward_sum, ep)
-            print(f"GNN Agent finished with total reward: {gnn_reward_sum}")
+            writer.add_scalar('GNN_Agent/Reward', loc_reward, ep)
+            print(f"GNN Agent classified {loc_env.num_components} components | Reward: {loc_reward:.2f} | F1: {l_info['f1']:.3f} | Faults: {l_info['true_faults_count']}")
 
         # Update the PPO Agent: --->
         if time_step % update_timestep == 0:

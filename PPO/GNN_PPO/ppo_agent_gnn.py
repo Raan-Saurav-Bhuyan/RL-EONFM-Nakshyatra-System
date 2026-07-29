@@ -12,6 +12,7 @@ class GNNRolloutBuffer:
         self.logprobs = []
         self.rewards = []
         self.is_terminals = []
+        self.ground_truths = []  # Ground truth labels for auxiliary BCE loss
 
     def clear(self):
         self.states.clear()
@@ -20,17 +21,22 @@ class GNNRolloutBuffer:
         self.logprobs.clear()
         self.rewards.clear()
         self.is_terminals.clear()
+        self.ground_truths.clear()
 
 class PPOAgentGNN:
-    """GNN-backed PPO Agent for explicit spatial fault localization with best-model checkpointing."""
+    """GNN-backed PPO Agent for full-graph fault classification with best-model checkpointing."""
     def __init__(
         self,
         lr = 3e-4,
         gamma = 0.99,
         K_epochs = 40,
         eps_clip = 0.2,
+        lambda_cls = 0.1,
+        use_auxiliary_cls_loss = True,
         save_dir = "models/GNN_PPO", checkpoint_name = "best_gnn_ppo.pt"):
         self.gamma, self.eps_clip, self.K_epochs = gamma, eps_clip, K_epochs
+        self.lambda_cls = lambda_cls
+        self.use_auxiliary_cls_loss = use_auxiliary_cls_loss
         self.buffer = GNNRolloutBuffer()
 
         # Model checkpoint directory and best-loss tracker: --->
@@ -44,20 +50,32 @@ class PPOAgentGNN:
         self.policy_old = ActorCriticGNN()
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.MseLoss = nn.MSELoss()
+        self.BceLoss = nn.BCELoss()
 
     def select_action(self, state, adj):
+        """
+        Select per-node binary classifications for all components.
+
+        Returns:
+            actions: numpy array of shape [num_nodes] with 0/1 labels.
+        """
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
         adj_tensor = torch.FloatTensor(adj).unsqueeze(0)
 
         with torch.no_grad():
-            action, logprob = self.policy_old.act(state_tensor, adj_tensor)
+            actions, logprob = self.policy_old.act(state_tensor, adj_tensor)
 
         self.buffer.states.append(state_tensor)
         self.buffer.adjs.append(adj_tensor)
-        self.buffer.actions.append(action)
-        self.buffer.logprobs.append(logprob)
+        self.buffer.actions.append(actions)       # (1, num_nodes)
+        self.buffer.logprobs.append(logprob)       # (1,)
 
-        return action.item()
+        return actions.squeeze(0).numpy()
+
+    def store_ground_truth(self, ground_truth):
+        """Store ground truth labels for auxiliary BCE loss computation."""
+        gt_tensor = torch.FloatTensor(ground_truth).unsqueeze(0)
+        self.buffer.ground_truths.append(gt_tensor)
 
     def update(self):
         # Early exit if the buffer is completely empty: --->
@@ -82,8 +100,13 @@ class PPOAgentGNN:
 
         old_states = torch.cat(self.buffer.states).detach()
         old_adjs = torch.cat(self.buffer.adjs).detach()
-        old_actions = torch.cat(self.buffer.actions).detach()
-        old_logprobs = torch.cat(self.buffer.logprobs).detach()
+        old_actions = torch.cat(self.buffer.actions).detach()    # (B, num_nodes)
+        old_logprobs = torch.cat(self.buffer.logprobs).detach()  # (B,)
+
+        # Prepare ground truth tensors for auxiliary BCE loss: --->
+        has_ground_truth = (self.use_auxiliary_cls_loss and len(self.buffer.ground_truths) == len(self.buffer.states))
+        if has_ground_truth:
+            old_ground_truths = torch.cat(self.buffer.ground_truths).detach()  # (B, num_nodes)
 
         total_loss_val, actor_loss_val, critic_loss_val = 0.0, 0.0, 0.0
 
@@ -99,6 +122,15 @@ class PPOAgentGNN:
             a_loss = -torch.min(surr1, surr2).mean()
             c_loss = 0.5 * self.MseLoss(state_values, rewards)
             loss = a_loss + c_loss - 0.01 * dist_entropy.mean()
+
+            # Auxiliary BCE classification loss: --->
+            if has_ground_truth:
+                cls_probs = self.policy.get_classification_probs(old_states, old_adjs)
+                
+                # cls_probs: (B, num_nodes, 2) — use probability of faulty class (index 1): --->
+                faulty_probs = cls_probs[:, :, 1]
+                cls_loss = self.BceLoss(faulty_probs, old_ground_truths)
+                loss = loss + self.lambda_cls * cls_loss
 
             self.optimizer.zero_grad()
             loss.backward()
