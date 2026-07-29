@@ -1,6 +1,11 @@
+import sys
+import os
 import gymnasium as gym
 import numpy as np
 import warnings
+
+# Ensure project root directory is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import eon_env                                                                          # <--- Registers the EON-v0 environment
 from clustering.similarity_learning import SimilarityClusterManager

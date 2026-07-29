@@ -1,5 +1,10 @@
+import sys
+import os
 import matplotlib.pyplot as plt
 import networkx as nx
+
+# Ensure project root directory is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from eon_env.v1.topology import NetworkTopology
 
@@ -60,8 +65,12 @@ def visualize_nsfnet_topology():
     fig.tight_layout()
     plt.axis('off')
 
-    plt.savefig("nsfnet_topology.png", dpi=300, bbox_inches='tight')
-    print("Network topology visualization saved to 'nsfnet_topology.png'")
+    out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../visualizations"))
+    os.makedirs(out_dir, exist_ok=True)
+    out_file = os.path.join(out_dir, "nsfnet_topology.png")
+
+    plt.savefig(out_file, dpi=300, bbox_inches='tight')
+    print(f"Network topology visualization saved to '{out_file}'")
 
 
 if __name__ == '__main__':

@@ -1,6 +1,10 @@
+import sys
+import os
 import matplotlib.pyplot as plt
 import networkx as nx
-import os
+
+# Ensure project root directory is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from eon_env.v2.environment import EONEnvV2
 
@@ -10,6 +14,11 @@ def visualize_v2_topology(json_path = "nsfnet.json"):
     Maps ROADM nodes and multi-layer structural links.
     """
     print(f"--- Generating V2 Topology Visualization from {json_path} ---")
+
+    if not os.path.exists(json_path):
+        root_json = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', json_path))
+        if os.path.exists(root_json):
+            json_path = root_json
 
     if not os.path.exists(json_path):
         print(f"Error: Could not find '{json_path}'. Please ensure the GNPy-compatible topology file exists.")
@@ -44,7 +53,9 @@ def visualize_v2_topology(json_path = "nsfnet.json"):
     fig.tight_layout()
     plt.axis('off')
 
-    out_file = "visualizations/nsfnet_topology_V2.png"
+    out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../visualizations"))
+    os.makedirs(out_dir, exist_ok=True)
+    out_file = os.path.join(out_dir, "nsfnet_topology_V2.png")
     plt.savefig(out_file, dpi = 300, bbox_inches = 'tight')
     print(f"Network topology visualization successfully saved to '{out_file}'")
 

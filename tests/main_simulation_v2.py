@@ -1,26 +1,37 @@
-import numpy as np
+import sys
+import os
 import random
 import time
-import os
+import numpy as np
 from datetime import datetime
+from torch.utils.tensorboard import SummaryWriter
 
-try:
-    from torch.utils.tensorboard import SummaryWriter
-except ImportError:
-    raise ImportError("TensorBoard is required for logging but is not installed. Please run 'pip install tensorboard'.")
+# Ensure project root directory is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from eon_env.v2.environment import EONEnvV2
 from eon_env.v2 import constants as const
 from clustering.LSH import LSHClusterManager
-from visualize_clusters import visualize_clusters_pca
+try:
+    from tests.visualize_clusters import visualize_clusters_pca
+except ImportError:
+    from visualize_clusters import visualize_clusters_pca
 from cluster_aggregations import FixedConvAggregator
 
-def run_v2_simulation_and_clustering(json_path = "nsfnet.json", target_services = const.NUM_LIGHTPATHS, sim_days = 730):
+def run_v2_simulation_and_clustering(
+    json_path = "nsfnet.json",
+    target_services = const.NUM_LIGHTPATHS,
+    sim_days = 730):
     """
     Provisions services using Flex-Grid & SDM constraints, advances temporal degradation,
     collects telemetry, and clusters OPM metrics via LSH.
     """
     print("--- Initializing V2 EON Digital Twin Simulator ---")
+    if not os.path.exists(json_path):
+        root_json = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', json_path))
+        if os.path.exists(root_json):
+            json_path = root_json
+
     if not os.path.exists(json_path):
         print(f"Error: Could not find '{json_path}'. Please ensure the JSON topology exists.")
         return
@@ -31,7 +42,7 @@ def run_v2_simulation_and_clustering(json_path = "nsfnet.json", target_services 
 
     # Initialize TensorBoard Writer with timestamped directory
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = f"runs/v2_simulation_{current_time}"
+    log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", f"runs/v2_simulation_{current_time}"))
     writer = SummaryWriter(log_dir=log_dir)
     print(f"--- TensorBoard Logging Initialized in: {log_dir} ---")
 

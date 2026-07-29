@@ -1,9 +1,14 @@
-import gymnasium as gym
-import numpy as np
-import matplotlib.pyplot as plt
-# import argparse
+import sys
+import os
 import time
 import warnings
+import numpy as np
+import matplotlib.pyplot as plt
+import gymnasium as gym
+from sklearn.decomposition import PCA
+
+# Ensure project root directory is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import eon_env
 from eon_env.v1 import constants as const
@@ -11,8 +16,6 @@ from eon_env.v1 import constants as const
 from clustering.LSH import LSHClusterManager, StandardScaler
 from clustering.similarity_learning import SimilarityClusterManager
 from clustering.contrastive_learning import ContrastiveClusterManager
-
-from sklearn.decomposition import PCA
 
 # Suppress warnings for cleaner output: --->
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empty slice")
@@ -70,9 +73,12 @@ def visualize_clusters_pca(observations, clusters, engine_name):
     ax.legend(title="Clusters", loc='best')
 
     fig.tight_layout()
-    # plt.show()
 
-    plt.savefig(f"visualizations/clusters/{engine_name}_cluster_visualization.png")
+    out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../visualizations/clusters"))
+    os.makedirs(out_dir, exist_ok=True)
+    out_file = os.path.join(out_dir, f"{engine_name}_cluster_visualization.png")
+    plt.savefig(out_file)
+    print(f"Cluster visualization saved to '{out_file}'")
 
 
 if __name__ == '__main__':

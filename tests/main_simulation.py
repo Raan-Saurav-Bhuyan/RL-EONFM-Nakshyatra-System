@@ -1,12 +1,20 @@
-import gymnasium as gym
-import numpy as np
+import sys
+import os
 import time
 import warnings
+import numpy as np
+import gymnasium as gym
+
+# Ensure project root directory is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import custom modules: --->
 import eon_env                                      # <--- Registers the EON-v0 environment
 from eon_env.v1 import constants as const
-from visualize_clusters import visualize_clusters_pca
+try:
+    from tests.visualize_clusters import visualize_clusters_pca
+except ImportError:
+    from visualize_clusters import visualize_clusters_pca
 
 # Import all clustering managers: --->
 from clustering.LSH import LSHClusterManager, StandardScaler
