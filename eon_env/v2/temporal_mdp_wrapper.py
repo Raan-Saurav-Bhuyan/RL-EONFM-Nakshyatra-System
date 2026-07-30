@@ -7,6 +7,8 @@ import math
 from .simulator import EONSimulatorV2
 from . import constants as const
 from clustering.LSH import LSHClusterManager
+from clustering.similarity_learning import SimilarityClusterManager
+from clustering.contrastive_learning import ContrastiveClusterManager
 from cluster_aggregations.fixed_conv_aggregator import FixedConvAggregator
 
 class TemporalEONEnvV2(gym.Env):
@@ -18,9 +20,10 @@ class TemporalEONEnvV2(gym.Env):
     """
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, network_json_path = "nsfnet.json", k_clusters = 5):
+    def __init__(self, network_json_path = "nsfnet.json", k_clusters = 5, engine_name = 'lsh'):
         super().__init__()
         self.network_json_path = network_json_path
+        self.engine_name = engine_name
 
         # State Space dimensions: --->
         self.years_window = 5
@@ -29,7 +32,21 @@ class TemporalEONEnvV2(gym.Env):
         self.features_per_cluster = self.num_metrics * 3 # 3 fixed conv filters
 
         # Tools: --->
-        self.lsh_manager = LSHClusterManager(input_dim=self.num_metrics, num_functions_k=6)
+        if self.engine_name == 'lsh':
+            self.cluster_manager = LSHClusterManager(input_dim=self.num_metrics, num_functions_k=6)
+        elif self.engine_name == 'similarity':
+            self.cluster_manager = SimilarityClusterManager(
+                input_dim=self.num_metrics, n_clusters=self.k_clusters, latent_dim=10,
+                pretrain_epochs=50, train_epochs=100, verbose=False
+            )
+        elif self.engine_name == 'contrastive':
+            self.cluster_manager = ContrastiveClusterManager(
+                input_dim=self.num_metrics, n_clusters=self.k_clusters, representation_dim=16,
+                projection_dim=8, epochs=200, temperature=0.1, verbose=False
+            )
+        else:
+            raise ValueError(f"Unknown clustering engine: {self.engine_name}")
+
         self.aggregator = FixedConvAggregator(num_metrics=self.num_metrics)
 
         # State Space: A 3D tensor -> (5, 5, 18): --->
@@ -69,11 +86,11 @@ class TemporalEONEnvV2(gym.Env):
         Performs LSH clustering, Convolutional Aggregation, and
         sorts the top K clusters by severity (BER).
         """
-        # Ensure enough variance for LSH: --->
+        # Ensure enough variance for clustering: --->
         if telemetry.shape[0] < self.k_clusters:
             telemetry = np.pad(telemetry, ((0, self.k_clusters - telemetry.shape[0]), (0, 0)))
 
-        clusters = self.lsh_manager.fit_predict(telemetry)
+        clusters = self.cluster_manager.fit_predict(telemetry)
 
         cluster_summaries = []
         for indices in clusters:

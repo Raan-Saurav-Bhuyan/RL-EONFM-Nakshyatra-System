@@ -27,6 +27,31 @@ PRETRAIN_LOCALIZATION = True  # Enable/disable independent pre-training of GNN a
 PRETRAIN_EPISODES = 10      # Number of episodes for independent pre-training
 
 
+def get_user_choice() -> str:
+    """
+    Prompts the user to select a clustering engine and validates the input.
+
+    Returns:
+        str: The chosen engine name ('lsh', 'similarity', or 'contrastive').
+    """
+    while True:
+        print("\n--- Please Select a Clustering Engine for V2 Digital Twin ---")
+        print("1: Locality Sensitive Hashing (LSH)")
+        print("2: Unsupervised Similarity Learning (Autoencoder)")
+        print("3: Self-Supervised Contrastive Learning (SSL)")
+
+        choice = input("Enter your choice (1, 2, or 3): ")
+
+        if choice == '1':
+            return 'lsh'
+        elif choice == '2':
+            return 'similarity'
+        elif choice == '3':
+            return 'contrastive'
+        else:
+            print("Invalid choice. Please enter 1, 2, or 3.")
+
+
 def pretrain_agents_unified(
     env,
     max_episodes = 500,
@@ -186,8 +211,11 @@ if __name__ == '__main__':
     os.makedirs(cnn_save_dir, exist_ok = True)
     os.makedirs(gnn_save_dir, exist_ok = True)
 
+    # Get user choice for clustering engine: --->
+    engine_name = get_user_choice()
+
     # Initialize Temporal MDP Environment for predictive Maintenance: --->
-    env = TemporalEONEnvV2()
+    env = TemporalEONEnvV2(engine_name=engine_name)
 
     state_dim_shape = env.observation_space.shape
     action_dim = env.action_space.n
