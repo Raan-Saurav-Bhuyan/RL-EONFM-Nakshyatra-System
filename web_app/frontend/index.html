@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SDM-EON Digital Twin & RL Command Center</title>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Vis.js Network CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" />
+  
+  <!-- Custom Glassmorphism Theme CSS -->
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <div id="app" class="app-container" v-cloak>
+    
+    <!-- Top Header Navigation Bar -->
+    <header class="navbar">
+      <div class="brand">
+        <i class="fa-solid fa-network-wired brand-icon"></i>
+        <div class="brand-text">
+          <span class="brand-title">SDM-EON Digital Twin</span>
+          <span class="brand-subtitle">RL Fault Detection & Component Localization</span>
+        </div>
+      </div>
+      
+      <div class="nav-tabs">
+        <button class="tab-btn" :class="{ active: activeTab === 'topology' }" @click="activeTab = 'topology'">
+          <i class="fa-solid fa-diagram-project"></i> Topology & Digital Twin
+        </button>
+        <button class="tab-btn" :class="{ active: activeTab === 'detection' }" @click="activeTab = 'detection'">
+          <i class="fa-solid fa-shield-halved"></i> Fault Detection & Localization
+        </button>
+        <button class="tab-btn" :class="{ active: activeTab === 'analytics' }" @click="activeTab = 'analytics'">
+          <i class="fa-solid fa-chart-line"></i> Training Analytics
+        </button>
+      </div>
+
+      <div class="header-status">
+        <button class="btn btn-icon" @click="toggleTheme" title="Toggle Light/Dark Mode" style="background: transparent; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-main); margin-right: 15px;">
+          <i class="fa-solid" :class="isLightMode ? 'fa-moon' : 'fa-sun'"></i>
+        </button>
+        <span class="system-status-pill" :class="'status-' + sysStatus.status"></span>
+        <span class="status-text">{{ sysStatus.text }}</span>
+      </div>
+    </header>
+
+    <!-- Main Content Body -->
+    <main class="main-content">
+      
+      <!-- Left Sidebar Controls Panel -->
+      <aside class="sidebar">
+        <div class="glass-panel control-section">
+          <h3><i class="fa-solid fa-sliders"></i> Session Controls</h3>
+          
+          <div class="form-group">
+            <label><i class="fa-solid fa-list-check"></i> Execution Mode</label>
+            <select v-model="config.mode" class="form-control" :disabled="sysStatus.status === 'running'">
+              <option value="integrated">Hierarchical Integrated Training (HRL-SFDL)</option>
+              <option value="pretrain">Unified Pre-Training (CNN + GNN)</option>
+              <option value="inference">Live Checkpoint Evaluation / Inference</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-cubes-stacked"></i> Clustering Engine</label>
+            <select v-model="config.engine_name" class="form-control" :disabled="sysStatus.status === 'running'">
+              <option value="lsh">Locality Sensitive Hashing (LSH)</option>
+              <option value="similarity">Unsupervised Similarity Learning (Autoencoder)</option>
+              <option value="contrastive">Self-Supervised Contrastive Learning (SSL)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-route"></i> Network Topology</label>
+            <div class="input-with-btn">
+              <select v-model="config.topology_path" class="form-control" :disabled="sysStatus.status === 'running'">
+                <option v-for="topo in topologies" :value="topo.name">{{ topo.name }} ({{ topo.num_nodes }} Nodes)</option>
+              </select>
+              <button class="btn btn-secondary btn-icon" @click="showModal('topology')" :disabled="sysStatus.status === 'running'" title="Upload Custom Topology JSON">
+                <i class="fa-solid fa-file-upload"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-rotate-right"></i> Max Episodes</label>
+            <input type="number" v-model="config.max_episodes" class="form-control" :disabled="sysStatus.status === 'running'" min="1" max="5000">
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-calendar-days"></i> Simulated Years</label>
+            <input type="number" v-model="config.simulated_years" class="form-control" :disabled="sysStatus.status === 'running'" min="1" max="100">
+          </div>
+
+          <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+            <label style="margin-bottom: 0;"><i class="fa-solid fa-robot"></i> Auto-Step Simulation</label>
+            <label class="switch" style="position: relative; display: inline-block; width: 40px; height: 20px;">
+              <input type="checkbox" v-model="config.auto_step" :disabled="sysStatus.status === 'running'" style="opacity: 0; width: 0; height: 0;">
+              <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--bg-card); transition: .4s; border-radius: 20px; border: 1px solid var(--glass-border);">
+                <span class="knob" :style="{ transform: config.auto_step ? 'translateX(20px)' : 'translateX(0)', backgroundColor: config.auto_step ? 'var(--primary)' : 'var(--text-muted)' }" style="position: absolute; content: ''; height: 14px; width: 14px; left: 2px; bottom: 2px; transition: .4s; border-radius: 50%;"></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-gauge-high"></i> Step Speed: <span>{{ config.step_delay_ms }}</span> ms</label>
+            <input type="range" v-model="config.step_delay_ms" class="range-slider" min="0" max="1000" step="10" @input="updateSpeed">
+          </div>
+
+          <!-- Session Action Buttons -->
+          <div class="btn-group">
+            <button class="btn btn-primary" @click="startSession" :disabled="sysStatus.status === 'running' || sysStatus.status === 'paused'">
+              <i class="fa-solid fa-play"></i> Start
+            </button>
+            <button class="btn btn-warning" @click="togglePause" :disabled="sysStatus.status === 'idle' || sysStatus.status === 'completed'">
+              <i class="fa-solid" :class="sysStatus.status === 'paused' ? 'fa-play' : 'fa-pause'"></i> {{ sysStatus.status === 'paused' ? 'Resume' : 'Pause' }}
+            </button>
+            <button class="btn btn-secondary" @click="stepForward" :disabled="sysStatus.status !== 'paused'" title="Step 1 Episode Forward">
+              <i class="fa-solid fa-forward-step"></i> Step
+            </button>
+            <button class="btn btn-danger" @click="stopSession" :disabled="sysStatus.status === 'idle' || sysStatus.status === 'completed'">
+              <i class="fa-solid fa-square"></i> Stop
+            </button>
+          </div>
+        </div>
+
+        <!-- Model Checkpoints Upload Panel -->
+        <div class="glass-panel control-section">
+          <h3><i class="fa-solid fa-brain"></i> Model Checkpoints</h3>
+          
+          <div class="form-group">
+            <label>CNN-PPO Checkpoint</label>
+            <select v-model="config.cnn_checkpoint" class="form-control" :disabled="sysStatus.status === 'running'">
+              <option value="">Default (Auto / Pre-trained)</option>
+              <option v-for="c in cnnCheckpoints" :value="c.path">{{ c.name }}</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>GNN-PPO Checkpoint</label>
+            <select v-model="config.gnn_checkpoint" class="form-control" :disabled="sysStatus.status === 'running'">
+              <option value="">Default (Auto / Pre-trained)</option>
+              <option v-for="g in gnnCheckpoints" :value="g.path">{{ g.name }}</option>
+            </select>
+          </div>
+
+          <button class="btn btn-outline btn-block" @click="showModal('checkpoint')" :disabled="sysStatus.status === 'running'">
+            <i class="fa-solid fa-file-arrow-up"></i> Upload Checkpoint (.pt)
+          </button>
+        </div>
+
+        <!-- Telemetry Summary Cards -->
+        <div class="glass-panel stats-card-grid">
+          <div class="stat-mini">
+            <span class="stat-label">Episode</span>
+            <span class="stat-value">{{ liveStats.episode }} / {{ liveStats.total_episodes }}</span>
+          </div>
+          <div class="stat-mini">
+            <span class="stat-label">Simulated Years</span>
+            <span class="stat-value">{{ liveStats.simulated_years }}</span>
+          </div>
+          <div class="stat-mini">
+            <span class="stat-label">Live FAR</span>
+            <span class="stat-value text-accent">{{ (liveStats.far * 100).toFixed(1) }}%</span>
+          </div>
+          <div class="stat-mini">
+            <span class="stat-label">Live MDR</span>
+            <span class="stat-value text-warning">{{ (liveStats.mdr * 100).toFixed(1) }}%</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Right Dashboard Content View Container -->
+      <section class="dashboard-views">
+        
+        <!-- Tab 1: Topology & Digital Twin Simulation -->
+        <div class="tab-pane" :class="{ active: activeTab === 'topology' }">
+          <div class="glass-panel viewport-container">
+            <div class="panel-header">
+              <h2><i class="fa-solid fa-circle-nodes"></i> SDM-EON Topology Graph & Live Digital Twin State</h2>
+              <div class="panel-actions">
+                <span class="badge badge-info">{{ topologyNameBadge }}</span>
+              </div>
+            </div>
+            
+            <div id="topology-graph-container" class="graph-canvas"></div>
+            
+            <div class="graph-legend">
+              <div class="legend-item"><span class="node-dot normal"></span> Healthy ROADM</div>
+              <div class="legend-item"><span class="node-dot warning"></span> Soft Degradation Warning</div>
+              <div class="legend-item"><span class="node-dot fault"></span> Hard Fault / Isolated Component</div>
+              <div class="legend-item"><span class="node-dot pred"></span> GNN Predicted Fault</div>
+            </div>
+          </div>
+
+          <!-- Bottom Metric Cards -->
+          <div class="grid-3-col">
+            <div class="glass-panel metric-card">
+              <h4>Detection Action</h4>
+              <div class="metric-big">
+                <span v-if="liveStats.action === 1" class="badge badge-lg badge-action"><i class="fa-solid fa-triangle-exclamation"></i> ISOLATE / MAINTAIN</span>
+                <span v-else class="badge badge-lg badge-neutral"><i class="fa-solid fa-eye"></i> MONITOR</span>
+              </div>
+              <p class="metric-subtext">Action chosen by CNN-PPO Agent</p>
+            </div>
+            
+            <div class="glass-panel metric-card">
+              <h4>GSNR Degradation</h4>
+              <div class="metric-big">{{ liveStats.degradation_db.toFixed(2) }} <span class="unit">dB</span></div>
+              <p class="metric-subtext">Threshold \(T_{\text{GSNR}} = 0.50\text{ dB}\)</p>
+            </div>
+            
+            <div class="glass-panel metric-card">
+              <h4>Failed Lightpaths</h4>
+              <div class="metric-big">{{ liveStats.n_failed_lightpaths }}</div>
+              <p class="metric-subtext">Total impacted optical paths</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Early Detection & Fault Localization -->
+        <div class="tab-pane" :class="{ active: activeTab === 'detection' }">
+          <div class="grid-2-col">
+            <div class="glass-panel">
+              <div class="panel-header">
+                <h2><i class="fa-solid fa-wave-square"></i> Early Soft Failure Detection (CNN-PPO)</h2>
+              </div>
+              <div class="chart-box">
+                <canvas id="chart-degradation-action"></canvas>
+              </div>
+            </div>
+
+            <div class="glass-panel">
+              <div class="panel-header">
+                <h2><i class="fa-solid fa-bullseye"></i> Component Localization (GNN-PPO)</h2>
+              </div>
+              <div class="localization-results-box">
+                <div class="loc-badge-container">
+                  <div class="loc-badge-card">
+                    <span class="loc-title">Predicted Fault Nodes</span>
+                    <div class="loc-nodes">{{ liveStats.pred_nodes.length > 0 ? liveStats.pred_nodes.join(', ') : 'None' }}</div>
+                  </div>
+                  <div class="loc-badge-card">
+                    <span class="loc-title">Ground Truth Fault Nodes</span>
+                    <div class="loc-nodes">{{ liveStats.gt_nodes.length > 0 ? liveStats.gt_nodes.join(', ') : 'None' }}</div>
+                  </div>
+                </div>
+
+                <div class="confusion-mini-grid">
+                  <div class="conf-box tp">
+                    <span class="conf-label">True Positives (TP)</span>
+                    <span class="conf-val">{{ liveStats.tp }}</span>
+                  </div>
+                  <div class="conf-box fp">
+                    <span class="conf-label">False Positives (FP)</span>
+                    <span class="conf-val">{{ liveStats.fp }}</span>
+                  </div>
+                  <div class="conf-box tn">
+                    <span class="conf-label">True Negatives (TN)</span>
+                    <span class="conf-val">{{ liveStats.tn }}</span>
+                  </div>
+                  <div class="conf-box fn">
+                    <span class="conf-label">False Negatives (FN)</span>
+                    <span class="conf-val">{{ liveStats.fn }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-panel margin-top">
+            <div class="panel-header">
+              <h2><i class="fa-solid fa-chart-column"></i> Live Classification Metrics</h2>
+            </div>
+            <div class="chart-box height-medium">
+              <canvas id="chart-classification-scores"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Performance Analysis & Live Loss Curves -->
+        <div class="tab-pane" :class="{ active: activeTab === 'analytics' }">
+          <div class="grid-2-col">
+            <div class="glass-panel">
+              <div class="panel-header"><h2><i class="fa-solid fa-trophy"></i> Episode Rewards</h2></div>
+              <div class="chart-box"><canvas id="chart-rewards"></canvas></div>
+            </div>
+            <div class="glass-panel">
+              <div class="panel-header"><h2><i class="fa-solid fa-percent"></i> Live FAR & MDR</h2></div>
+              <div class="chart-box"><canvas id="chart-far-mdr"></canvas></div>
+            </div>
+            <div class="glass-panel">
+              <div class="panel-header"><h2><i class="fa-solid fa-chart-area"></i> CNN-PPO Loss Curves</h2></div>
+              <div class="chart-box"><canvas id="chart-cnn-losses"></canvas></div>
+            </div>
+            <div class="glass-panel">
+              <div class="panel-header"><h2><i class="fa-solid fa-chart-area"></i> GNN-PPO Loss Curves</h2></div>
+              <div class="chart-box"><canvas id="chart-gnn-losses"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Event Log Panel (Bottom) -->
+    <div class="event-log-panel">
+      <div class="log-header">
+        <span><i class="fa-solid fa-terminal"></i> System Event Log</span>
+        <button class="btn btn-secondary btn-sm" @click="clearLogs">Clear</button>
+      </div>
+      <div class="log-content" ref="logContent">
+        <div v-for="(log, idx) in logs" :key="idx" class="log-entry" :class="log.type">
+          <span class="log-time">{{ log.time }}</span>
+          <span class="log-msg">{{ log.message }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay" :class="{ active: activeModal === 'topology' }">
+      <div class="glass-panel modal-box">
+        <div class="modal-header">
+          <h3><i class="fa-solid fa-file-code"></i> Upload Custom Topology JSON</h3>
+          <button class="close-btn" @click="hideModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="file-dropzone" @click="$refs.topoFile.click()">
+            <i class="fa-solid fa-cloud-arrow-up drop-icon"></i>
+            <span>{{ topoFileName || 'Click to select .json file' }}</span>
+            <input type="file" ref="topoFile" accept=".json" class="hidden-file-input" @change="onTopoFileChange">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="hideModal">Cancel</button>
+          <button class="btn btn-primary" @click="uploadTopology">Upload & Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" :class="{ active: activeModal === 'checkpoint' }">
+      <div class="glass-panel modal-box">
+        <div class="modal-header">
+          <h3><i class="fa-solid fa-brain"></i> Upload Model Checkpoint (.pt)</h3>
+          <button class="close-btn" @click="hideModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Target Agent</label>
+            <select v-model="ckptAgentType" class="form-control">
+              <option value="cnn">CNN-PPO Detection Agent</option>
+              <option value="gnn">GNN-PPO Localization Agent</option>
+            </select>
+          </div>
+          <div class="file-dropzone" @click="$refs.ckptFile.click()">
+            <i class="fa-solid fa-microchip drop-icon"></i>
+            <span>{{ ckptFileName || 'Click to select .pt file' }}</span>
+            <input type="file" ref="ckptFile" accept=".pt,.pth" class="hidden-file-input" @change="onCkptFileChange">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="hideModal">Cancel</button>
+          <button class="btn btn-primary" @click="uploadCheckpoint">Upload</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div class="toast-container">
+      <div v-for="toast in toasts" :key="toast.id" class="toast" :class="toast.type">
+        <i class="fa-solid" :class="toast.icon"></i>
+        <span>{{ toast.message }}</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- JavaScript Libraries -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Web App Application Modules -->
+  <script src="js/websocket_client.js"></script>
+  <script src="js/topology_view.js"></script>
+  <script src="js/charts_view.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

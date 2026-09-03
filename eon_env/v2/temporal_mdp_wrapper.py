@@ -20,7 +20,7 @@ class TemporalEONEnvV2(gym.Env):
     """
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, network_json_path = "nsfnet.json", k_clusters = 5, engine_name = 'lsh'):
+    def __init__(self, network_json_path = "nsfnet.json", k_clusters = 5, engine_name = 'lsh', simulated_years=10):
         super().__init__()
         self.network_json_path = network_json_path
         self.engine_name = engine_name
@@ -65,7 +65,7 @@ class TemporalEONEnvV2(gym.Env):
         self.initial_gsnr = 0.0
         self.final_gsnr = 0.0
         self.final_failed_lightpaths = 0
-        self.simulated_years = 10
+        self.simulated_years = simulated_years
 
     def _get_active_telemetry(self) -> np.ndarray:
         """Extracts OPM telemetry for active services."""
